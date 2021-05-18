@@ -1,4 +1,4 @@
-from pid import PID
+from src.pid import PID
 import matplotlib.pyplot as plt
 import numpy as np
 
