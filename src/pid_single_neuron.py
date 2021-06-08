@@ -3,10 +3,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 num_timesteps = 400
-setpoints = 0.1 * np.ones(num_timesteps)
-setpoints[100:] *= 2
+setpoints = 0.2 * np.ones(num_timesteps)
+n = 50
+setpoints[:n] = np.arange(n) / n / 2
+setpoints[200:] *= 2
 
-pid = PID(setpoint=1, k_p=1, k_i=1, k_d=1)
+pid = PID(k_p=2, k_i=0.1, k_d=0.1)
 
 process_values = []
 threshold = 1
@@ -14,14 +16,20 @@ membrane_potential = 0
 spikecount = 0
 for t, setpoint in enumerate(setpoints):
 
-    membrane_potential += 0.1
+    inp = setpoint  # Neuron is a simple source follower.
+    firing_rate = spikecount / (t + 1)
+    control_variable = pid.update(firing_rate, setpoint=setpoint, t=t)
+    inp += control_variable
+
+    membrane_potential += inp
     if membrane_potential > threshold:
+        # membrane_potential = 0
         membrane_potential -= threshold
         spikecount += 1
 
     firing_rate = spikecount / (t + 1)
-    control_variable = pid.update(firing_rate, setpoint=setpoint, t=t)
-    threshold -= 0.1 * control_variable
+    # control_variable = pid.update(firing_rate, setpoint=setpoint, t=t)
+    # threshold -= 0.1 * control_variable
 
     process_values.append(firing_rate)
 
