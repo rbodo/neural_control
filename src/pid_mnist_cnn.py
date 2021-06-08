@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sb
 
+from brownian import brownian
 from src.pid import PID
 
 
@@ -34,7 +35,7 @@ def get_dataset(dataset_name, num_classes, flatten=False):
     if flatten:
         x_train = np.reshape(x_train, (len(x_train), -1))
         x_test = np.reshape(x_test, (len(x_test), -1))
-    else:
+    elif dataset_name == 'mnist':
         x_train = np.expand_dims(x_train, -1)
         x_test = np.expand_dims(x_test, -1)
 
@@ -44,10 +45,10 @@ def get_dataset(dataset_name, num_classes, flatten=False):
     return x_train, y_train, x_test, y_test
 
 
-def get_model(x_train, y_train, x_test, y_test, model_kwargs):
+def get_model(x_train, y_train, x_test, y_test, model_kwargs, evaluate=False):
     model_path = model_kwargs['model_path']
     model_type = model_kwargs['model_type']
-    relu_slope = model_kwargs['relu_slope']
+    relu_slope = model_kwargs.get('relu_slope', 0)
     if os.path.isfile(model_path):
         model = keras.models.load_model(model_path)
         # for layer in model.layers:#
@@ -57,7 +58,7 @@ def get_model(x_train, y_train, x_test, y_test, model_kwargs):
         #         layer.set_weights([w, b])
     else:
         batch_size = 128
-        epochs = 10
+        epochs = 20
         input_shape = x_test.shape[1:]
         num_classes = y_test.shape[-1]
 
@@ -84,7 +85,7 @@ def get_model(x_train, y_train, x_test, y_test, model_kwargs):
                 layers.Conv2D(64, (3, 3), activation='relu', name='layer_2'),
                 layers.MaxPooling2D(),
                 layers.Flatten(),
-                layers.Dropout(0.5),
+                # layers.Dropout(0.5),
                 layers.Dense(num_classes, activation='relu', name='layer_3')
             ])
         elif model_type == 'dae':
@@ -111,10 +112,11 @@ def get_model(x_train, y_train, x_test, y_test, model_kwargs):
 
         model.save(model_path)
 
-    model.summary()
+    # model.summary()
 
-    score = model.evaluate(x_test, y_test, verbose=0)
-    print(f"Test accuracy: {score[1]:.2%}")
+    if evaluate:
+        score = model.evaluate(x_test, y_test, verbose=0)
+        print(f"Test accuracy: {score[1]:.2%}")
 
     return model
 
@@ -220,40 +222,42 @@ class Perturbation(ABC):
 
 
 class PoissonNoisePerturbation(Perturbation):
-    def __init__(self, rng=None, normalize=False):
+    def __init__(self, rng=None, normalize=False, static=False):
         super().__init__('poisson_noise')
         self.rng = np.random.default_rng() if rng is None else rng
         self.normalize = normalize
+        self.static = static
 
-    def apply(self, x, scale, static=False):
+    def apply(self, x, scale):
         lam = x[0]  # Use pixel values at first time step (pixels are static).
-        if static:
+        if self.static:
             noise = self.rng.poisson(lam, (1,) + (x.shape[1:]))
             noise = np.repeat(noise, len(x), 0)
         else:
             noise = self.rng.poisson(lam, x.shape)
         x_ = x + scale * noise
-        return normalize(x_) if self.normalize else x_
+        return normalize_array(x_) if self.normalize else x_
 
 
 class GaussianNoisePerturbation(Perturbation):
-    def __init__(self, rng=None, normalize=False):
+    def __init__(self, rng=None, normalize=False, static=False):
         super().__init__('gaussian_noise')
         self.rng = np.random.default_rng() if rng is None else rng
         self.normalize = normalize
+        self.static = static
 
-    def apply(self, x, scale, static=False):
-        if static:
+    def apply(self, x, scale):
+        if self.static:
             noise = self.rng.standard_normal((1,) + (x.shape[1:]))
             noise = np.repeat(noise, len(x), 0)
         else:
             noise = self.rng.standard_normal(x.shape)
         noise[noise < 0] = 0
         x_ = x + scale * noise
-        return normalize(x_) if self.normalize else x_
+        return normalize_array(x_) if self.normalize else x_
 
 
-def normalize(x):
+def normalize_array(x):
     return x / np.max(x)
 
 
@@ -270,11 +274,52 @@ class ContrastPerturbation(Perturbation):
         return self.contrast(x, factor)
 
 
+class BrownianPerturbation(Perturbation):
+    def __init__(self, delta, drift=0, num_timesteps=1, rng=None):
+        super(BrownianPerturbation, self).__init__('brownian')
+        self.delta = delta
+        self.drift = drift
+        self.num_timesteps = num_timesteps
+        self.rng = rng
+
+    def apply(self, x, scale):
+        return brownian(x, self.num_timesteps, scale * self.delta, scale,
+                        scale * self.drift, rng=self.rng)
+
+
 def apply_perturbation(x, num_timesteps, perturbation, scale, **kwargs):
 
-    assert x.shape[0] == 1, "Axis 0 of image sample must have size 1."
-    x_p = np.repeat(x, num_timesteps, 0)
-    return perturbation.apply(x_p, scale, **kwargs)
+    if num_timesteps > 1:
+        assert x.shape[0] == 1, "Axis 0 of image sample must have size 1."
+        x = np.repeat(x, num_timesteps, 0)
+    return perturbation.apply(x, scale, **kwargs)
+
+
+class ModelPerturber:
+    def __init__(self, model, layer_names, perturbation, scales):
+        self.model = model
+        self.layer_names = layer_names
+        self.perturbation = perturbation
+        self.scales = scales
+        self.params_perturbed = None
+
+    def apply(self):
+        self.params_perturbed = {}
+        for layer_name in self.layer_names:
+            layer = self.model.get_layer(layer_name)
+            w, b = layer.get_weights()
+            self.params_perturbed.setdefault(layer_name, {})
+            for scale in self.scales:
+                w_perturbed = self.perturbation.apply(w, scale)
+                self.params_perturbed[layer_name][scale] = [w_perturbed, b]
+
+    def step(self, t, scale, layer_names=None):
+        layer_names = self.layer_names if layer_names is None else layer_names
+        for layer_name in layer_names:
+            layer = self.model.get_layer(layer_name)
+            w_t, b = self.params_perturbed[layer_name][scale]
+            # Set weights with current time slice.
+            layer.set_weights([w_t[t], b])
 
 
 def step(model, x, data, label, scale, perturbation_name, layer_name,
@@ -420,7 +465,7 @@ def get_shape(dataset_name):
 
 def make_config():
     model_type = 'mlp'  # 'cnn', 'mlp', 'dae'
-    dataset_name = 'cifar10'  # 'mnist', 'cifar10'
+    dataset_name = 'mnist'  # 'mnist', 'cifar10'
     relu_slope = 0.1
     growth_factor = 1.05
 
@@ -440,7 +485,7 @@ def make_config():
     plot_process_variable = False
     plot_fileformat = '.png'
     num_timesteps = 10
-    num_to_test = 100
+    num_to_test = 20
     window_ratio = 0.2
 
     layer_names = ['layer_1', 'layer_2', 'layer_3']
@@ -533,10 +578,10 @@ def main():
     perturbation_list = [
         {'function': PoissonNoisePerturbation(rng),
          'scales': [0, 0.1, 0.2, 0.3, 0.4, 0.7, 1],
-         'kwargs': {'static': True}},
+         'kwargs': {}},
         {'function': GaussianNoisePerturbation(rng),
          'scales': [0, 0.1, 0.2, 0.3, 0.4, 0.7, 1],
-         'kwargs': {'static': True}},
+         'kwargs': {}},
         {'function': ContrastPerturbation(),
          'scales': [0, 0.1, 0.2, 0.3, 0.4, 0.7, 1],
          'kwargs': {}}
