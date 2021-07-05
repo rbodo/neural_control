@@ -80,7 +80,7 @@ def get_model(x_train, y_train, x_test, y_test, model_kwargs, evaluate=False):
         elif model_type == 'cnn':
             model = keras.Sequential([
                 layers.InputLayer(input_shape, name='layer_0'),
-                layers.Conv2D(32, (3, 3), activation='relu', name='layer_1'),
+                layers.Conv2D(64, (3, 3), activation='relu', name='layer_1'),
                 layers.MaxPooling2D(),
                 layers.Conv2D(64, (3, 3), activation='relu', name='layer_2'),
                 layers.MaxPooling2D(),
