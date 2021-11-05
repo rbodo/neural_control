@@ -3,6 +3,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from functools import partial
+from typing import List
 
 import numpy as np
 from tensorflow import keras
@@ -248,13 +249,43 @@ class GaussianNoisePerturbation(Perturbation):
 
     def apply(self, x, scale):
         if self.static:
-            noise = self.rng.standard_normal((1,) + (x.shape[1:]))
+            noise = self.rng.standard_normal((1,) + x.shape[1:])
             noise = np.repeat(noise, len(x), 0)
         else:
             noise = self.rng.standard_normal(x.shape)
         noise[noise < 0] = 0
         x_ = x + scale * noise
         return normalize_array(x_) if self.normalize else x_
+
+
+class GaussianNoiseWithDriftPerturbation(GaussianNoisePerturbation):
+    def __init__(self, rng=None, normalize=False, static=False, drift=0,
+                 homogeneous_drift=True):
+        super().__init__(rng, normalize, static)
+        self.drift = drift
+        self.homogeneous_drift = homogeneous_drift
+
+    def apply_drift(self, x, scale):
+        if self.static:
+            drift = np.zeros_like(x)
+            if self.homogeneous_drift:  # Add drift impulse at first time step.
+                drift[0] = self.drift
+            else:  # Add random drift impulse at first time step.
+                drift[0] = self.drift * self.rng.standard_normal((1,) +
+                                                                 x.shape[1:])
+        else:
+            if self.homogeneous_drift:
+                drift = self.drift  # Add same amount of drift at each step.
+            else:  # Add same random amount of drift at each time step.
+                drift = self.drift * self.rng.standard_normal((1,) +
+                                                              x.shape[1:])
+                drift = np.repeat(drift, len(x), 0)
+        x = x + scale * drift
+        return x
+
+    def apply(self, x, scale):
+        x = self.apply_drift(x, scale)
+        return super().apply(x, scale)
 
 
 def normalize_array(x):
@@ -409,7 +440,7 @@ def save_output(data, path):
 
 def plot_results(path: str,
                  path_data: str,
-                 perturbations: list[dict],
+                 perturbations: List[dict],
                  num_timesteps: int,
                  num_samples: int,
                  labels: np.array = None,

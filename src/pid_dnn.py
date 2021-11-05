@@ -1,6 +1,7 @@
 import configparser
 import os
 import time
+from typing import List
 
 import numpy as np
 from tensorflow import keras
@@ -11,7 +12,8 @@ from tensorflow.keras import layers
 
 from src.pid import PID
 from pid_mnist_cnn import save_config, save_output, get_dataset, \
-    ModelPerturber, get_model, GaussianNoisePerturbation, BrownianPerturbation
+    ModelPerturber, get_model, GaussianNoiseWithDriftPerturbation, \
+    BrownianPerturbation
 
 
 class ActivationPID(layers.Activation):
@@ -106,13 +108,13 @@ def make_config():
     num_timesteps = 10
 
     config = configparser.ConfigParser()
-    config['paths'] = {'path_base': '/home/rbodo/Data/neural_control',
+    config['paths'] = {'path_base': '/home/bodrue/Data/neural_control',
                        'path_wd': os.path.join('%(path_base)s', 'log', 'tmp',
                                                str(time.time())),
                        'path_models': os.path.join('%(path_base)s', 'models'),
                        'path_model': os.path.join('%(path_models)s',
                                                   f'pid_{dataset_name}_'
-                                                  f'{model_type}.h5'),
+                                                  f'{model_type}1.h5'),
                        'path_plots': os.path.join('%(path_wd)s', 'plots'),
                        'path_data': os.path.join('%(path_wd)s', 'data'),
                        'filename_data': 'data'}
@@ -133,8 +135,9 @@ def make_config():
     config['perturbations'] = {
         'input_perturbation_scales': str([0, 0.2, 0.4, 0.7, 1]),
         'model_perturbation_scales': str([0, 0.2, 0.4, 0.7, 1]),
-        'input_perturbation_kwargs': {'normalize': False, 'static': False},
-        'model_perturbation_kwargs': {'delta': 1e-4, 'drift': 1e-4,
+        'input_perturbation_kwargs': {'normalize': False, 'static': False,
+                                      'drift': 1e-3},
+        'model_perturbation_kwargs': {'delta': 1e-3, 'drift': 0,
                                       'num_timesteps': num_timesteps}}
 
     return config
@@ -350,7 +353,7 @@ def main(config, input_perturbation, model_perturbation,
 
 def plot_results(path: str,
                  path_data: str,
-                 layer_names: list[str],
+                 layer_names: List[str],
                  output_format: str = '.png'):
 
     data = pd.DataFrame(pd.read_hdf(path_data, 'data'))
@@ -383,7 +386,7 @@ if __name__ == '__main__':
         'perturbations', 'input_perturbation_kwargs'))
     model_perturbation_kwargs = eval(_config.get(
         'perturbations', 'model_perturbation_kwargs'))
-    _input_perturbation = GaussianNoisePerturbation(
+    _input_perturbation = GaussianNoiseWithDriftPerturbation(
         rng, **input_perturbation_kwargs)
     _model_perturbation = BrownianPerturbation(
         rng=rng, **model_perturbation_kwargs)
