@@ -137,6 +137,35 @@ def lqe_controller_output(t, x, u, params):
     return -params['K'].dot(x)
 
 
+# noinspection PyUnusedLocal
+def lqe_filter_output(t, x, u, params):
+    # Direct passthrough of estimated process states.
+    return x
+
+
+# noinspection PyUnusedLocal
+def rnn_controller_dynamics(t, x, u, params):
+    rnn = params['rnn']
+    # Add dummy dimensions for shape [num_timesteps, batch_size, num_states].
+    _u = mx.nd.array(np.expand_dims(u, [0, 1]))
+    # Add dummy dimensions for shape [num_layers, batch_size, num_states].
+    _x = mx.nd.array(np.reshape(x, (-1, 1, rnn.num_hidden)))
+    y, x_new = rnn(_u, _x)
+    dxdt = (x_new[0].asnumpy().ravel() - x) / params['dt']
+    return dxdt
+
+
+# noinspection PyUnusedLocal
+def rnn_controller_output(t, x, u, params):
+    rnn = params['rnn']
+    # Add dummy dimensions for shape [num_timesteps, batch_size, num_states].
+    _u = mx.nd.array(np.expand_dims(u, [0, 1]))
+    # Add dummy dimensions for shape [num_layers, batch_size, num_states].
+    _x = mx.nd.array(np.reshape(x, (-1, 1, rnn.num_hidden)))
+    y, x_new = rnn(_u, _x)
+    return y.asnumpy()[0, 0]
+
+
 class StochasticInterconnectedSystem(control.InterconnectedSystem):
     """Stochastic version of an `InterconnectedSystem`.
 
