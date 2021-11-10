@@ -1,6 +1,7 @@
 from src.double_integrator.configs.config import config as cfg
 
-cfg.paths.PATH_OUT = 'C:\\Users\\u714174\\Data\\neural_control\\figures'
+# cfg.paths.PATH_OUT = 'C:\\Users\\u714174\\Data\\neural_control\\figures'
+cfg.paths.PATH_OUT = '/home/bodrue/Data/neural_control/figures'
 
 cfg.simulation.T = 10
 

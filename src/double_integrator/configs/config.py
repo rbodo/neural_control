@@ -9,9 +9,17 @@ config = CfgNode()
 config.SEED = 42
 config.paths = CfgNode()
 config.paths.PATH_OUT = '..'  # Where to save plots
+config.paths.PATH_TRAINING_DATA = '..'  # Where to save or load training data
+config.paths.PATH_MODEL = '..'
+
+config.training = CfgNode()
+config.training.BATCH_SIZE = 32
+config.training.LEARNING_RATE = 1e-3
+config.training.NUM_EPOCHS = 100
 
 config.simulation = CfgNode()
 config.simulation.T = 10  # Simulation duration
+config.simulation.NUM_STEPS = 100  # Number of steps in simulation duration
 
 config.process = CfgNode()
 config.process.PROCESS_NOISE = 0.
@@ -25,6 +33,8 @@ config.controller.cost.lqr = CfgNode()
 config.controller.cost.lqr.Q = 0.5  # Scale factor for state cost
 config.controller.cost.lqr.R = 0.5  # Scale factor for control cost
 config.controller.STATE_TARGET = []
+
+config.set_new_allowed(True)
 
 
 def get_config(
