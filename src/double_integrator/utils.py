@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
+import mxnet as mx
 
 
 sns.set_theme(style='whitegrid')
@@ -29,8 +30,8 @@ def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky'):
 
     # Check for off-diagonal terms. If components are independent, can use more
     # efficient computation.
-    is_correlated = np.count_nonzero(cov - np.diag(np.diagonal(cov)))
-    if not is_correlated:  # Expensive
+    is_correlated = np.count_nonzero(cov - np.diag(np.diagonal(cov))) > 0
+    if is_correlated:  # Expensive
         return rng.multivariate_normal(mean, cov, size, method=method)
 
     # Use one-dimensional standard normal distribution (cheaper). Have to
@@ -110,10 +111,9 @@ def lqr_controller_output(t, x, u, params):
     return -params['K'].dot(u)
 
 
-def lqe_controller_dynamics(t, x, u, params):
+# noinspection PyUnusedLocal
+def lqe_dynamics(t, x, u, params):
     """Continuous-time Kalman-Bucy Filter."""
-
-    y = u
 
     A = params['A']
     B = params['B']
@@ -121,7 +121,10 @@ def lqe_controller_dynamics(t, x, u, params):
     D = params['D']
     L = params['L']
 
-    # Control:
+    # Noisy and partial process state observation:
+    y = u
+
+    # Control input:
     _u = lqe_controller_output(t, x, u, params)
 
     # Updated estimate:
@@ -252,12 +255,12 @@ def plot_timeseries(t, u=None, y=None, x=None, c=None, dimension_map=None,
         ax.set_title(title)
 
     if path is not None:
-        g.savefig(path, bbox_inches='tight', format='png')
+        g.savefig(path, bbox_inches='tight')
     plt.show()
 
 
-def plot_phase_diagram(state_dict, odefunc=None, W=None, start_points=None,
-                       n=10, xt=None, path=None):
+def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
+                       start_points=None, n=10, xt=None, path=None):
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
     labels = list(state_dict.keys())
     states = list(state_dict.values())
@@ -286,28 +289,26 @@ def plot_phase_diagram(state_dict, odefunc=None, W=None, start_points=None,
         grid = grid[::-1]
         shape2d = grid.shape[1:]
 
-        # Initialize the state vectors at each location in grid. Possibly
-        # augment by noisy state estimate.
-        if W is None:
-            x = grid
-        else:
-            # Precompute noise for efficiency
+        # Initialize the process state vectors at each location in grid.
+        x = grid
+        # If we have an LQE, add initial values for noisy state estimates.
+        if W is not None:
             noise = get_additive_white_gaussian_noise(W, shape2d, RNG)
             # Add noise to grid coordinates.
-            x_hat = np.empty_like(grid)
-            for i, j in np.ndindex(shape2d):
-                x_hat[:, i, j] = grid[:, i, j] + noise[i, j, :]
-            x = np.concatenate([grid, x_hat])
-
+            x_hat = grid + np.moveaxis(noise, -1, 0)
+            x = np.concatenate([x, x_hat])
+        # If we have a stateful controller (e.g. RNN), add initial values.
+        if num_states is not None:
+            x = np.concatenate([x, np.zeros((num_states,) + shape2d)])
         # Compute derivatives at each grid node.
         dx = np.empty_like(x)
         for i, j in np.ndindex(shape2d):
             dx[:, i, j] = odefunc(0, x[:, i, j], [])
 
         # Draw streamlines and arrows.
-        plt.streamplot(grid[0], grid[1], dx[0, :, :], dx[1, :, :],
+        plt.streamplot(grid[0], grid[1], dx[0], dx[1],
                        start_points=start_points, linewidth=0.3)
 
     if path is not None:
-        plt.savefig(path, bbox_inches='tight', format='png')
+        plt.savefig(path, bbox_inches='tight')
     plt.show()

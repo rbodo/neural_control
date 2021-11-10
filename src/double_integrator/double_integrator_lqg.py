@@ -10,7 +10,7 @@ from src.double_integrator.double_integrator_lqr import DiLqr
 from src.double_integrator.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, plot_phase_diagram,
-    lqe_controller_dynamics, lqe_controller_output)
+    lqe_dynamics, lqe_controller_output)
 
 
 class DiLqg(DiLqr):
@@ -55,7 +55,7 @@ class DiLqg(DiLqr):
                     'V': self.V})
 
         controller = control.NonlinearIOSystem(
-            lqe_controller_dynamics, lqe_controller_output,
+            lqe_dynamics, lqe_controller_output,
             inputs=self.n_u_control,
             outputs=self.n_y_control,
             states=self.n_x_control,
@@ -67,7 +67,7 @@ class DiLqg(DiLqr):
                     'K': self.K,
                     'L': self.L})
 
-        connections = self._get_process_controll_connections()
+        connections = self._get_system_connections()
 
         system_closed = StochasticInterconnectedSystem(
             [system_open, controller], connections, outlist=['control.y[0]'])
@@ -87,11 +87,12 @@ def main(config):
     # Sample some initial states.
     n = 1
     X0_process = di_lqg.get_initial_states(config.process.STATE_MEAN,
-                                           config.process.STATE_COVARIANCE)
+                                           config.process.STATE_COVARIANCE, n)
     X0_control = np.tile(config.process.STATE_MEAN, (n, 1))
     X0 = np.concatenate([X0_process, X0_control], 1)
 
-    times = np.linspace(0, config.simulation.T, 100, endpoint=False)
+    times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
+                        endpoint=False)
 
     # Simulate the system with LQR control.
     for x0 in X0:
@@ -100,15 +101,16 @@ def main(config):
 
         # Compute cost, using only true, not observed, states.
         c = di_lqg.get_cost(x[:di_lqg.n_x_process], y)
+        print("Total cost: {}.".format(np.sum(c)))
 
         path_out = config.paths.PATH_OUT
         plot_timeseries(t, None, y, x, c, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_lqr'))
+                        os.path.join(path_out, 'timeseries_lqg'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
-                           system_closed.dynamics, di_lqg.W,
+                           odefunc=system_closed.dynamics, W=di_lqg.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_lqr'))
+                           path=os.path.join(path_out, 'phase_diagram_lqg'))
 
 
 if __name__ == '__main__':

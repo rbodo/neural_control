@@ -64,7 +64,8 @@ def main(config):
     X0 = di.get_initial_states(config.process.STATE_MEAN,
                                config.process.STATE_COVARIANCE)
 
-    times = np.linspace(0, config.simulation.T, 100, endpoint=False)
+    times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
+                        endpoint=False)
 
     # Simulate the system without control.
     for x0 in X0:
@@ -76,6 +77,7 @@ def main(config):
                         path=os.path.join(path_out, 'timeseries'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
+                           odefunc=system_open.dynamics,
                            xt=config.controller.STATE_TARGET,
                            path=os.path.join(path_out, 'phase_diagram'))
 

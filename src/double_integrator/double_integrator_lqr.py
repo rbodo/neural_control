@@ -45,7 +45,7 @@ class DiLqr(DI):
     def get_cost(self, x, u):
         return get_lqr_cost(x, u, self.Q, self.R)
 
-    def _get_process_controll_connections(self):
+    def _get_system_connections(self):
         # Connect input ports of process with output ports of controller.
         # Connect input ports of controller with output ports of process.
         # The first entry in the tuple specifies the system index
@@ -53,7 +53,7 @@ class DiLqr(DI):
         # within the input or output vector. The first tuple in a sublist
         # specifies an input port, the second tuple an output port of the
         # corresponding system.
-        connections = [[(0, i), (1, i)] for i in range(self.n_y_control)] + \
+        connections = [[(0, i), (1, i)] for i in range(self.n_u_process)] + \
                       [[(1, i), (0, i)] for i in range(self.n_u_control)]
         # # Equivalent, but less scalable:
         # connections = [['system_open.u[0]', 'control.y[0]'],
@@ -81,7 +81,7 @@ class DiLqr(DI):
             name='control',
             params={'K': self.K})
 
-        connections = self._get_process_controll_connections()
+        connections = self._get_system_connections()
 
         system_closed = control.InterconnectedSystem(
             [system_open, controller], connections, outlist=['control.y[0]'])
@@ -101,7 +101,8 @@ def main(config):
     X0 = di_lqr.get_initial_states(config.process.STATE_MEAN,
                                    config.process.STATE_COVARIANCE)
 
-    times = np.linspace(0, config.simulation.T, 100, endpoint=False)
+    times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
+                        endpoint=False)
 
     # Simulate the system with LQR control.
     for x0 in X0:
@@ -109,13 +110,14 @@ def main(config):
                                                 return_x=True)
 
         c = di_lqr.get_cost(x, y)
+        print("Total cost: {}.".format(np.sum(c)))
 
         path_out = config.paths.PATH_OUT
         plot_timeseries(t, None, y, x, c, DIMENSION_MAP,
                         os.path.join(path_out, 'timeseries_lqr'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
-                           system_closed.dynamics,
+                           odefunc=system_closed.dynamics,
                            xt=config.controller.STATE_TARGET,
                            path=os.path.join(path_out, 'phase_diagram_lqr'))
 
