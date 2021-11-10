@@ -169,6 +169,15 @@ def rnn_controller_output(t, x, u, params):
     return y.asnumpy()[0, 0]
 
 
+# noinspection PyUnusedLocal
+def mlp_controller_output(t, x, u, params):
+    mlp = params['mlp']
+    # Add dummy dimension for batch size.
+    _u = mx.nd.array(np.expand_dims(u, 0))
+    y = mlp(_u)
+    return y.asnumpy()[0]
+
+
 class StochasticInterconnectedSystem(control.InterconnectedSystem):
     """Stochastic version of an `InterconnectedSystem`.
 

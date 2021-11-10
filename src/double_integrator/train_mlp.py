@@ -10,25 +10,20 @@ from sklearn.model_selection import train_test_split
 from src.double_integrator.configs.config import get_config
 
 
-class RNNModel(mx.gluon.HybridBlock):
+class MLPModel(mx.gluon.HybridBlock):
 
-    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, **kwargs):
+    def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
 
         super().__init__(**kwargs)
 
         self.num_hidden = num_hidden
 
         with self.name_scope():
-            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers,
-                                        activation='tanh')
-            self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
-                                             in_units=num_hidden,
-                                             flatten=False)
+            self.hidden = mx.gluon.nn.Dense(num_hidden, activation='relu')
+            self.output = mx.gluon.nn.Dense(num_outputs, activation='tanh')
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        output, hidden = self.rnn(x, args[0])
-        decoded = self.decoder(output)
-        return decoded, hidden
+        return self.output(self.hidden(x))
 
 
 def main():
@@ -38,10 +33,9 @@ def main():
     print(context)
 
     config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_rnn.py')
+                         'double_integrator/configs/config_mlp.py')
 
     num_hidden = config.model.NUM_HIDDEN
-    num_layers = config.model.NUM_LAYERS
     num_outputs = 1
 
     path_dataset = config.paths.PATH_TRAINING_DATA
@@ -52,6 +46,9 @@ def main():
     data = np.load(os.path.join(path_dataset, 'lqg.npz'))
     x = data['X']
     y = data['Y']
+
+    x = np.reshape(np.swapaxes(x, 1, 2), (-1, x.shape[1]))
+    y = np.reshape(np.swapaxes(y, 1, 2), (-1, y.shape[1]))
 
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3)
 
@@ -65,7 +62,7 @@ def main():
         test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
         last_batch='discard')
 
-    model = RNNModel(num_hidden, num_layers, num_outputs)
+    model = MLPModel(num_hidden, num_outputs)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)
     # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
@@ -74,21 +71,14 @@ def main():
     trainer = mx.gluon.Trainer(model.collect_params(), 'sgd',
                                {'learning_rate': lr})
 
-    hidden_init = mx.nd.zeros((num_layers, batch_size, model.num_hidden),
-                              ctx=context)
     for epoch in range(num_epochs):
         train_loss, valid_loss = 0, 0
-        label = None
         tic = time.time()
         for data, label in train_data_loader:
-            # Move time axis from last to first position to conform to RNN
-            # convention.
-            data = mx.nd.moveaxis(data, -1, 0)
             data = data.as_in_context(context)
             label = label.as_in_context(context)
             with mx.autograd.record():
-                output, hidden = model(data, hidden_init)
-                output = mx.nd.moveaxis(output, 0, -1)
+                output = model(data)
                 loss = loss_function(output, label)
 
             loss.backward()
@@ -98,16 +88,16 @@ def main():
             train_loss += loss.mean().asscalar()
 
         for data, label in test_data_loader:
-            data = np.moveaxis(data, -1, 0)
             data = data.as_in_context(context)
             label = label.as_in_context(context)
-            output, hidden = model(data, hidden_init)
-            output = mx.nd.moveaxis(output, 0, -1)
+            output = model(data)
             loss = loss_function(output, label)
             valid_loss += loss.mean().asscalar()
 
-        plt.plot(output[0, 0].asnumpy(), label='RNN')
-        plt.plot(label[0, 0].asnumpy(), label='LQR')
+        num_steps = config.simulation.NUM_STEPS
+        x0 = mx.nd.array(x[:num_steps], context)
+        plt.plot(model(x0)[:, 0].asnumpy(), label='MLP')
+        plt.plot(y[:num_steps, 0], label='LQR')
         plt.legend()
         plt.xlabel('Time')
         plt.ylabel('Control')
