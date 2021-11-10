@@ -4,40 +4,42 @@ from collections import OrderedDict
 
 import control
 import numpy as np
+import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.double_integrator_lqr import DiLqr
+from src.double_integrator.double_integrator_lqg import DiLqg
+from src.double_integrator.train_rnn import RNNModel
 from src.double_integrator.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
-    DIMENSION_MAP, plot_timeseries, plot_phase_diagram,
-    lqe_controller_dynamics, lqe_controller_output)
+    DIMENSION_MAP, plot_timeseries, plot_phase_diagram, rnn_controller_output,
+    lqe_dynamics, lqe_filter_output, rnn_controller_dynamics)
 
 
-class DiLqg(DiLqr):
-    def __init__(self, q=0.5, r=0.5, var_x=0, var_y=0):
-        super().__init__(q, r, var_x)
+class DiRnn(DiLqg):
+    def __init__(self, q=0.5, r=0.5, var_x=0, var_y=0, num_hidden=1,
+                 num_layers=1, path_model=None):
+        super().__init__(q, r, var_x, var_y)
+        # In LQG, we used the estimated states for feedback control. Here we
+        # use them as input to the RNN. The LQG becomes just a filter; the RNN
+        # the controller.
+        self.n_u_filter = self.n_y_process  # Filter sees part of process outp.
+        self.n_x_filter = self.n_x_process  # Filter estimates process states
+        self.n_y_filter = self.n_x_filter  # Filter outputs estimated states
+        self.n_u_control = self.n_y_filter  # Controller receives filter output
+        self.n_x_control = num_hidden * num_layers
 
-        self.n_y_process = 1                 # Number of process outputs
-        self.n_x_control = self.n_x_process  # Number of control states
-        self.n_u_control = self.n_y_process  # Number of control inputs
+        self.rnn = RNNModel(num_hidden, num_layers)
+        # self.rnn.hybridize()
+        if path_model is None:
+            self.rnn.initialize()
+        else:
+            self.rnn.load_parameters(path_model)
 
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Only observe position.
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
-
-        # Observation noise:
-        self.V = var_y * np.eye(self.n_y_process)
-
-        # Kalman gain matrix:
-        self.L = self.get_Kalman_gain()
-
-    def get_Kalman_gain(self):
-        # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
-        # equation, and eigenvalues F of estimator poles A-LC.
-        L, P, F = control.lqe(self.A, np.eye(self.n_x_process), self.C, self.W,
-                              self.V)
-        return L
+    def _get_system_connections(self):
+        connections = [[(0, i), (2, i)] for i in range(self.n_u_process)] + \
+                      [[(1, i), (0, i)] for i in range(self.n_y_process)] + \
+                      [[(2, i), (1, i)] for i in range(self.n_u_control)]
+        return connections
 
     def get_system(self):
 
@@ -54,23 +56,33 @@ class DiLqg(DiLqr):
                     'W': self.W,
                     'V': self.V})
 
-        controller = control.NonlinearIOSystem(
-            lqe_controller_dynamics, lqe_controller_output,
-            inputs=self.n_u_control,
-            outputs=self.n_y_control,
-            states=self.n_x_control,
-            name='control',
+        kalman_filter = control.NonlinearIOSystem(
+            lqe_dynamics, lqe_filter_output,
+            inputs=self.n_u_filter,
+            outputs=self.n_y_filter,
+            states=self.n_x_filter,
+            name='filter',
             params={'A': self.A,
                     'B': self.B,
                     'C': self.C,
                     'D': self.D,
-                    'K': self.K,
-                    'L': self.L})
+                    'L': self.L,
+                    'K': self.K})
 
-        connections = self._get_process_controll_connections()
+        controller = control.NonlinearIOSystem(
+            rnn_controller_dynamics, rnn_controller_output,
+            inputs=self.n_u_control,
+            outputs=self.n_y_control,
+            states=self.n_x_control,
+            name='control',
+            params={'rnn': self.rnn,
+                    'dt': 1e-1})
+
+        connections = self._get_system_connections()
 
         system_closed = StochasticInterconnectedSystem(
-            [system_open, controller], connections, outlist=['control.y[0]'])
+            [system_open, kalman_filter, controller], connections,
+            outlist=['control.y[0]'])
 
         return system_closed
 
@@ -79,41 +91,59 @@ def main(config):
     np.random.seed(42)
 
     # Create double integrator with LQR feedback.
-    di_lqg = DiLqg(config.controller.cost.lqr.Q, config.controller.cost.lqr.R,
+    di_rnn = DiRnn(config.controller.cost.lqr.Q,
+                   config.controller.cost.lqr.R,
                    config.process.PROCESS_NOISE,
-                   config.process.OBSERVATION_NOISE)
-    system_closed = di_lqg.get_system()
+                   config.process.OBSERVATION_NOISE,
+                   config.model.NUM_HIDDEN,
+                   config.model.NUM_LAYERS,
+                   config.paths.PATH_MODEL)
+    system_closed = di_rnn.get_system()
 
     # Sample some initial states.
     n = 1
-    X0_process = di_lqg.get_initial_states(config.process.STATE_MEAN,
-                                           config.process.STATE_COVARIANCE)
-    X0_control = np.tile(config.process.STATE_MEAN, (n, 1))
-    X0 = np.concatenate([X0_process, X0_control], 1)
+    X0_process = di_rnn.get_initial_states(config.process.STATE_MEAN,
+                                           config.process.STATE_COVARIANCE, n)
+    X0_filter = np.tile(config.process.STATE_MEAN, (n, 1))
+    X0_control = np.zeros((n, di_rnn.n_x_control))
+    X0 = np.concatenate([X0_process, X0_filter, X0_control], 1)
 
-    times = np.linspace(0, config.simulation.T, 100, endpoint=False)
+    times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
+                        endpoint=False)
 
     # Simulate the system with LQR control.
+    show_rnn_states = True
     for x0 in X0:
+        # Bring RNN to steady-state on current static input.
+        if config.simulation.DO_WARMUP:
+            input_shape = (config.simulation.NUM_STEPS // 10, 1,
+                           di_rnn.n_u_process)
+            _u0 = np.tile(config.process.STATE_MEAN, input_shape)
+            _x0 = np.expand_dims(x0[-di_rnn.n_x_control:], (0, 1))
+            _, _x0 = di_rnn.rnn(mx.nd.array(_u0), mx.nd.array(_x0))
+            x0[-di_rnn.n_x_control:] = _x0[0].asnumpy()
+
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
                                                 return_x=True)
 
         # Compute cost, using only true, not observed, states.
-        c = di_lqg.get_cost(x[:di_lqg.n_x_process], y)
+        c = di_rnn.get_cost(x[:di_rnn.n_x_process], y)
+        print("Total cost: {}.".format(np.sum(c)))
 
         path_out = config.paths.PATH_OUT
-        plot_timeseries(t, None, y, x, c, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_lqr'))
+        _x = x if show_rnn_states else x[:-di_rnn.n_x_control]
+        plot_timeseries(t, None, y, _x, c, DIMENSION_MAP,
+                        os.path.join(path_out, 'timeseries_rnn'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
-                           system_closed.dynamics, di_lqg.W,
+                           di_rnn.n_x_control, W=di_rnn.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_lqr'))
+                           path=os.path.join(path_out, 'phase_diagram_rnn'))
 
 
 if __name__ == '__main__':
 
-    _config = get_config('configs/config_lqg.py')
+    _config = get_config('configs/config_rnn.py')
 
     main(_config)
 
