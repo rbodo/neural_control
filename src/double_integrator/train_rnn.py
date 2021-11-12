@@ -50,8 +50,9 @@ def main():
     num_epochs = config.training.NUM_EPOCHS
 
     data = np.load(os.path.join(path_dataset, 'lqg.npz'))
-    x = data['X']
-    y = data['Y']
+    # x = data['X']  # 'X' are the noise free process states.
+    x = data['Y']  # 'Y' is the process output (used as input here).
+    y = data['U']  # 'U' is the control signal (used as labels here).
 
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3)
 
@@ -119,6 +120,7 @@ def main():
             valid_loss / len(test_data_loader)))
 
     model.save_parameters(config.paths.PATH_MODEL)
+    print("Saved model to {}.".format(config.paths.PATH_MODEL))
 
 
 if __name__ == '__main__':

@@ -43,17 +43,19 @@ def main(config):
 
     # Simulate the system with LQR control.
     X = np.empty((num_samples, di_lqg.n_x_control, num_steps), np.float32)
-    Y = np.empty((num_samples, di_lqg.n_y_control, num_steps), np.float32)
+    Y = np.empty((num_samples, di_lqg.n_u_control, num_steps), np.float32)
+    U = np.empty((num_samples, di_lqg.n_y_control, num_steps), np.float32)
     for i in range(num_samples):
         t, y, x = control.input_output_response(system_closed, times,
                                                 X0=X0[i], return_x=True)
         X[i] = x[-di_lqg.n_x_control:]  # Get state estimate of Kalman filter
-        Y[i] = y  # Get control signal
+        Y[i] = y[-di_lqg.n_u_control:]  # Get noisy state observations
+        U[i] = y[:di_lqg.n_y_control]  # Get control signal
         print("\r{:3.2%}".format((i + 1) / num_samples), end='', flush=True)
 
     # Store state trajectories and corresponding control signals.
     np.savez_compressed(os.path.join(config.paths.PATH_TRAINING_DATA, 'lqg'),
-                        X=X, Y=Y)
+                        X=X, U=U, Y=Y)
 
 
 if __name__ == '__main__':

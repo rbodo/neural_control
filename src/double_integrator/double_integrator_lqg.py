@@ -70,7 +70,8 @@ class DiLqg(DiLqr):
         connections = self._get_system_connections()
 
         system_closed = StochasticInterconnectedSystem(
-            [system_open, controller], connections, outlist=['control.y[0]'])
+            [system_open, controller], connections,
+            outlist=['control.y[0]', 'system_open.y[0]'])
 
         return system_closed
 
