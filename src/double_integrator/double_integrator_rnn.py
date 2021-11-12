@@ -74,7 +74,7 @@ class DiRnn(DI):
 def main(config):
     np.random.seed(42)
 
-    # Create double integrator with LQR feedback.
+    # Create double integrator with RNN feedback.
     di_rnn = DiRnn(config.process.PROCESS_NOISE,
                    config.process.OBSERVATION_NOISE,
                    config.model.NUM_HIDDEN,

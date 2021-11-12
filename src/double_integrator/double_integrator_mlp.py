@@ -16,9 +16,6 @@ from src.double_integrator.utils import (
 class DiMlp(DI):
     def __init__(self, var_x=0, var_y=0, num_hidden=1, path_model=None):
         super().__init__(var_x)
-        # In LQG, we used the estimated states for feedback control. Here we
-        # use them as input to the MLP. The LQG becomes just a filter; the MLP
-        # the controller.
         self.n_u_control = self.n_y_process
         self.n_y_control = self.n_u_process
 
@@ -70,7 +67,7 @@ class DiMlp(DI):
 def main(config):
     np.random.seed(42)
 
-    # Create double integrator with LQR feedback.
+    # Create double integrator with MLP feedback.
     di_mlp = DiMlp(config.process.PROCESS_NOISE,
                    config.process.OBSERVATION_NOISE,
                    config.model.NUM_HIDDEN,

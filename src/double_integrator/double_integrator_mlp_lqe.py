@@ -18,13 +18,6 @@ class DiMlpLqe(DiLqg):
     def __init__(self, q=0.5, r=0.5, var_x=0, var_y=0, num_hidden=1,
                  path_model=None):
         super().__init__(q, r, var_x, var_y)
-        # In LQG, we used the estimated states for feedback control. Here we
-        # use them as input to the MLP. The LQG becomes just a filter; the MLP
-        # the controller.
-        self.n_u_filter = self.n_y_process  # Filter sees part of process outp.
-        self.n_x_filter = self.n_x_process  # Filter estimates process states
-        self.n_y_filter = self.n_x_filter  # Filter outputs estimated states
-        self.n_u_control = self.n_y_filter  # Controller receives filter output
 
         self.mlp = MLPModel(num_hidden)
         # self.mlp.hybridize()
@@ -32,12 +25,6 @@ class DiMlpLqe(DiLqg):
             self.mlp.initialize()
         else:
             self.mlp.load_parameters(path_model)
-
-    def _get_system_connections(self):
-        connections = [[(0, i), (2, i)] for i in range(self.n_u_process)] + \
-                      [[(1, i), (0, i)] for i in range(self.n_y_process)] + \
-                      [[(2, i), (1, i)] for i in range(self.n_u_control)]
-        return connections
 
     def get_system(self):
 
@@ -86,7 +73,7 @@ class DiMlpLqe(DiLqg):
 def main(config):
     np.random.seed(42)
 
-    # Create double integrator with LQR feedback.
+    # Create double integrator with MLP feedback.
     di_mlp = DiMlpLqe(config.controller.cost.lqr.Q,
                       config.controller.cost.lqr.R,
                       config.process.PROCESS_NOISE,
@@ -127,7 +114,7 @@ def main(config):
 
 if __name__ == '__main__':
 
-    _config = get_config('configs/config_mlp.py')
+    _config = get_config('configs/config_mlp_lqe.py')
 
     main(_config)
 

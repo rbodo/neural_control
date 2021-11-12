@@ -10,7 +10,7 @@ from src.double_integrator.double_integrator_lqr import DiLqr
 from src.double_integrator.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, plot_phase_diagram,
-    lqe_dynamics, lqe_controller_output)
+    lqe_dynamics, lqe_filter_output, lqr_controller_output)
 
 
 class DiLqg(DiLqr):
@@ -18,8 +18,10 @@ class DiLqg(DiLqr):
         super().__init__(q, r, var_x)
 
         self.n_y_process = 1                 # Number of process outputs
-        self.n_x_control = self.n_x_process  # Number of control states
-        self.n_u_control = self.n_y_process  # Number of control inputs
+        self.n_u_filter = self.n_y_process  # Filter sees part of process outp.
+        self.n_x_filter = self.n_x_process  # Filter estimates process states
+        self.n_y_filter = self.n_x_filter  # Filter outputs estimated states
+        self.n_u_control = self.n_y_filter  # Controller receives filter output
 
         # Output matrices:
         self.C = np.zeros((self.n_y_process, self.n_x_process))
@@ -39,6 +41,12 @@ class DiLqg(DiLqr):
                               self.V)
         return L
 
+    def _get_system_connections(self):
+        connections = [[(0, i), (2, i)] for i in range(self.n_u_process)] + \
+                      [[(1, i), (0, i)] for i in range(self.n_y_process)] + \
+                      [[(2, i), (1, i)] for i in range(self.n_u_control)]
+        return connections
+
     def get_system(self):
 
         system_open = control.NonlinearIOSystem(
@@ -54,23 +62,30 @@ class DiLqg(DiLqr):
                     'W': self.W,
                     'V': self.V})
 
-        controller = control.NonlinearIOSystem(
-            lqe_dynamics, lqe_controller_output,
-            inputs=self.n_u_control,
-            outputs=self.n_y_control,
-            states=self.n_x_control,
-            name='control',
+        kalman_filter = control.NonlinearIOSystem(
+            lqe_dynamics, lqe_filter_output,
+            inputs=self.n_u_filter,
+            outputs=self.n_y_filter,
+            states=self.n_x_filter,
+            name='filter',
             params={'A': self.A,
                     'B': self.B,
                     'C': self.C,
                     'D': self.D,
-                    'K': self.K,
-                    'L': self.L})
+                    'L': self.L,
+                    'K': self.K})
+
+        controller = control.NonlinearIOSystem(
+            None, lqr_controller_output,
+            inputs=self.n_u_control,
+            outputs=self.n_y_control,
+            name='control',
+            params={'K': self.K})
 
         connections = self._get_system_connections()
 
         system_closed = StochasticInterconnectedSystem(
-            [system_open, controller], connections,
+            [system_open, kalman_filter, controller], connections,
             outlist=['control.y[0]', 'system_open.y[0]'])
 
         return system_closed
@@ -80,7 +95,8 @@ def main(config):
     np.random.seed(42)
 
     # Create double integrator with LQR feedback.
-    di_lqg = DiLqg(config.controller.cost.lqr.Q, config.controller.cost.lqr.R,
+    di_lqg = DiLqg(config.controller.cost.lqr.Q,
+                   config.controller.cost.lqr.R,
                    config.process.PROCESS_NOISE,
                    config.process.OBSERVATION_NOISE)
     system_closed = di_lqg.get_system()
@@ -99,6 +115,9 @@ def main(config):
     for x0 in X0:
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
                                                 return_x=True)
+
+        # Keep only control signal from output.
+        y = y[:di_lqg.n_y_control]
 
         # Compute cost, using only true, not observed, states.
         c = di_lqg.get_cost(x[:di_lqg.n_x_process], y)

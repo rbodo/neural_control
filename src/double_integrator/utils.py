@@ -107,7 +107,8 @@ def process_output(t, x, u, params):
 
 # noinspection PyUnusedLocal
 def lqr_controller_output(t, x, u, params):
-    # Assume perfect observability / estimation of the process states.
+    # Receives as input either the perfectly observed or estimated process
+    # states.
     return -params['K'].dot(u)
 
 
@@ -124,20 +125,13 @@ def lqe_dynamics(t, x, u, params):
     # Noisy and partial process state observation:
     y = u
 
-    # Control input:
-    _u = lqe_controller_output(t, x, u, params)
+    # Compute control input (note that we feed in estimated states x as u):
+    _u = lqr_controller_output(t, x, x, params)
 
     # Updated estimate:
     dx = A.dot(x) + B.dot(_u) + L.dot(y - C.dot(x) - D.dot(_u))
 
     return dx
-
-
-# noinspection PyUnusedLocal
-def lqe_controller_output(t, x, u, params):
-    # The hidden states x of the controller represent an estimate of the
-    # process states based on noisy observations y.
-    return -params['K'].dot(x)
 
 
 # noinspection PyUnusedLocal
