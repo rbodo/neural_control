@@ -7,12 +7,14 @@ cfg.paths.PATH_TRAINING_DATA = '/home/bodrue/Data/neural_control/training_data'
 cfg.paths.PATH_MODEL = '/home/bodrue/Data/neural_control/models/rnn.params'
 
 cfg.model = CfgNode()
-cfg.model.NUM_HIDDEN = 10
+cfg.model.NUM_HIDDEN = 50
 cfg.model.NUM_LAYERS = 1
+cfg.model.ACTIVATION = 'relu'
 
 cfg.training.BATCH_SIZE = 32
-cfg.training.LEARNING_RATE = 1e-2
-cfg.training.NUM_EPOCHS = 50
+cfg.training.LEARNING_RATE = 1e-3
+cfg.training.NUM_EPOCHS = 35
+cfg.training.OPTIMIZER = 'adam'
 
 cfg.simulation.T = 10
 cfg.simulation.NUM_STEPS = 100

@@ -1,7 +1,9 @@
 import os
 import sys
 import time
+import logging
 
+import optuna
 import numpy as np
 import mxnet as mx
 from matplotlib import pyplot as plt
@@ -10,17 +12,49 @@ from sklearn.model_selection import train_test_split
 from src.double_integrator.configs.config import get_config
 
 
+def create_model(trial):
+    num_layers = trial.suggest_int('num_layers', 1, 2)
+    num_hidden = trial.suggest_int('num_hidden', 4, 64, log=True)
+    activation = trial.suggest_categorical('activation', ['tanh', 'relu'])
+    dropout = trial.suggest_float('dropout', 0, 1)
+    return RNNModel(num_hidden, num_layers, 1, activation, dropout)
+
+
+def create_optimizer(trial, batch_size=1):
+    # We optimize over the type of optimizer to use, and over the learning
+    # rate and weight decay.
+    weight_decay = trial.suggest_float('weight_decay', 1e-10, 1e-3, log=True)
+    optimizer_name = trial.suggest_categorical('optimizer',
+                                               ['Adam', 'MomentumSGD'])
+
+    rescale_grad = 1 / batch_size
+
+    if optimizer_name == 'Adam':
+        adam_lr = trial.suggest_float('adam_lr', 1e-5, 1e-1, log=True)
+        optimizer = mx.optimizer.Adam(adam_lr, wd=weight_decay,
+                                      rescale_grad=rescale_grad)
+    else:
+        momentum_sgd_lr = trial.suggest_float('momentum_sgd_lr', 1e-5, 1e-1,
+                                              log=True)
+        optimizer = mx.optimizer.SGD(momentum_sgd_lr, wd=weight_decay,
+                                     rescale_grad=rescale_grad)
+
+    return optimizer
+
+
 class RNNModel(mx.gluon.HybridBlock):
 
     def __init__(self, num_hidden=1, num_layers=1, num_outputs=1,
-                 activation='relu', **kwargs):
+                 activation='tanh', dropout=0, **kwargs):
 
         super().__init__(**kwargs)
 
         self.num_hidden = num_hidden
+        self.num_layers = num_layers
 
         with self.name_scope():
-            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation)
+            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers,
+                                        activation, dropout=dropout)
             self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
                                              in_units=num_hidden,
                                              flatten=False)
@@ -31,7 +65,7 @@ class RNNModel(mx.gluon.HybridBlock):
         return decoded, hidden
 
 
-def main():
+def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
     num_cpus = min(os.cpu_count() // 2, 1)
     num_gpus = mx.context.num_gpus()
     context = mx.gpu(1) if num_gpus > 0 else mx.cpu()
@@ -40,16 +74,9 @@ def main():
     config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
                          'double_integrator/configs/config_rnn.py')
 
-    num_hidden = config.model.NUM_HIDDEN
-    num_layers = config.model.NUM_LAYERS
-    num_outputs = 1
-    activation = config.model.ACTIVATION
-
     path_dataset = config.paths.PATH_TRAINING_DATA
     batch_size = config.training.BATCH_SIZE
-    lr = config.training.LEARNING_RATE
     num_epochs = config.training.NUM_EPOCHS
-    optimizer = config.training.OPTIMIZER
 
     data = np.load(os.path.join(path_dataset, 'lqg.npz'))
     # x = data['X']  # 'X' are the noise free process states.
@@ -68,20 +95,21 @@ def main():
         test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
         last_batch='discard')
 
-    model = RNNModel(num_hidden, num_layers, num_outputs, activation)
+    model = create_model(trial)
+    optimizer = create_optimizer(trial, batch_size)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)
     # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
 
     loss_function = mx.gluon.loss.L2Loss()
-    trainer = mx.gluon.Trainer(model.collect_params(), optimizer,
-                               {'learning_rate': lr,
-                                'rescale_grad': 1 / batch_size})
+    trainer = mx.gluon.Trainer(model.collect_params(), optimizer)
 
-    hidden_init = mx.nd.zeros((num_layers, batch_size, model.num_hidden),
+    hidden_init = mx.nd.zeros((model.num_layers, batch_size, model.num_hidden),
                               ctx=context)
+    valid_loss = 0
     for epoch in range(num_epochs):
-        train_loss, valid_loss = 0, 0
+        train_loss = 0
+        valid_loss = 0
         label = None
         tic = time.time()
         for data, label in train_data_loader:
@@ -110,23 +138,46 @@ def main():
             loss = loss_function(output, label)
             valid_loss += loss.mean().asscalar()
 
-        plt.plot(output[0, 0].asnumpy(), label='RNN')
-        plt.plot(label[0, 0].asnumpy(), label='LQR')
-        plt.legend()
-        plt.xlabel('Time')
-        plt.ylabel('Control')
-        plt.show()
+        if plot_accuracy:
+            plt.plot(output[0, 0].asnumpy(), label='RNN')
+            plt.plot(label[0, 0].asnumpy(), label='LQR')
+            plt.legend()
+            plt.xlabel('Time')
+            plt.ylabel('Control')
+            plt.show()
 
-        print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}.".format(
-            epoch, time.time() - tic,
-            train_loss / len(train_data_loader),
-            valid_loss / len(test_data_loader)))
+        if verbose:
+            print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
+                  "".format(epoch, time.time() - tic,
+                            train_loss / len(train_data_loader),
+                            valid_loss / len(test_data_loader)))
 
-    model.save_parameters(config.paths.PATH_MODEL)
-    print("Saved model to {}.".format(config.paths.PATH_MODEL))
+    if save_model:
+        model.save_parameters(config.paths.PATH_MODEL)
+        print("Saved model to {}.".format(config.paths.PATH_MODEL))
+
+    return valid_loss / len(test_data_loader)
 
 
 if __name__ == '__main__':
-    main()
+    optuna.logging.get_logger('optuna').addHandler(
+        logging.StreamHandler(sys.stdout))
+    study_name = 'rnn'  # Unique identifier of the study.
+    storage_name = 'sqlite:///{}.db'.format(study_name)
+    study = optuna.create_study(storage_name, study_name=study_name,
+                                direction='minimize')
+    study.optimize(objective, n_trials=1000, timeout=None,
+                   show_progress_bar=True)
+
+    print("Number of finished trials: ", len(study.trials))
+
+    print("Best trial:")
+    best_trial = study.best_trial
+
+    print("  Value: ", best_trial.value)
+
+    print("  Params: ")
+    for key, value in best_trial.params.items():
+        print("    {}: {}".format(key, value))
 
     sys.exit()
