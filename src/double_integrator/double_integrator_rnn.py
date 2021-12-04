@@ -12,7 +12,7 @@ from src.double_integrator.train_rnn import RNNModel
 from src.double_integrator.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, plot_phase_diagram, rnn_controller_output,
-    rnn_controller_dynamics)
+    rnn_controller_dynamics, get_lqr_cost)
 
 
 class DiRnn(DI):
@@ -82,6 +82,15 @@ def main(config):
                    config.paths.PATH_MODEL)
     system_closed = di_rnn.get_system()
 
+    # State cost matrix:
+    q = config.controller.cost.lqr.Q
+    Q = np.zeros((di_rnn.n_x_process, di_rnn.n_x_process))
+    Q[0, 0] = q  # Only position contributes to cost.
+
+    # Control cost matrix:
+    r = config.controller.cost.lqr.R
+    R = r * np.eye(di_rnn.n_y_control)
+
     # Sample some initial states.
     n = 1
     X0_process = di_rnn.get_initial_states(config.process.STATE_MEAN,
@@ -94,6 +103,7 @@ def main(config):
 
     # Simulate the system with RNN control.
     show_rnn_states = True
+    c = None
     for x0 in X0:
         # Bring RNN to steady-state on current static input.
         if config.simulation.DO_WARMUP:
@@ -105,11 +115,19 @@ def main(config):
             x0[-di_rnn.n_x_control:] = _x0[0].asnumpy()
 
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
-                                                return_x=True)
+                                                return_x=True, solve_ivp_method='RK45')
+
+        # Keep only control signal from output.
+        y = y[:di_rnn.n_y_control]
+
+        if Q is not None and R is not None:
+            # Compute cost, using only true, not observed, states.
+            c = get_lqr_cost(x[:di_rnn.n_x_process], y, Q, R)
+            print("Total cost: {}.".format(np.sum(c)))
 
         path_out = config.paths.PATH_OUT
         _x = x if show_rnn_states else x[:-di_rnn.n_x_control]
-        plot_timeseries(t, None, y, _x, None, DIMENSION_MAP,
+        plot_timeseries(t, None, y, _x, c, DIMENSION_MAP,
                         os.path.join(path_out, 'timeseries_rnn'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),

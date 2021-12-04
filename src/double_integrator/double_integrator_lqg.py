@@ -94,7 +94,7 @@ class DiLqg(DiLqr):
 def main(config):
     np.random.seed(42)
 
-    # Create double integrator with LQR feedback.
+    # Create double integrator with LQG feedback.
     di_lqg = DiLqg(config.controller.cost.lqr.Q,
                    config.controller.cost.lqr.R,
                    config.process.PROCESS_NOISE,
@@ -111,10 +111,11 @@ def main(config):
     times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
                         endpoint=False)
 
-    # Simulate the system with LQR control.
+    # Simulate the system with LQG control.
     for x0 in X0:
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
-                                                return_x=True)
+                                                return_x=True,
+                                                solve_ivp_method='RK45')
 
         # Keep only control signal from output.
         y = y[:di_lqg.n_y_control]
@@ -135,7 +136,8 @@ def main(config):
 
 if __name__ == '__main__':
 
-    _config = get_config('configs/config_lqg.py')
+    _config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
+                         'double_integrator/configs/config_lqg.py')
 
     main(_config)
 

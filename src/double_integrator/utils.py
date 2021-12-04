@@ -183,23 +183,21 @@ class StochasticInterconnectedSystem(control.InterconnectedSystem):
     the observation noise while computing the static response.
     """
 
+    # noinspection PyProtectedMember
     def _compute_static_io(self, t, x, u):
         # Loop over all systems to find the ones with observation noise.
         for sys in self.syslist:
             V = sys.params.get('V', None)
-            # Temporarily freeze the noise vector applied to the system output.
+            # Freeze the noise vector applied to the system output at the
+            # current time step. Necessary because the solver might call the
+            # dynamics function multiple times per step.
             if V is not None:
-                v = get_observation_noise(V)
-                # noinspection PyProtectedMember
-                sys._update_params({'_v': v})
+                if t != sys._current_params.get('_t', -1):
+                    v = get_observation_noise(V)
+                    sys._update_params({'_v': v, '_t': t})
 
         # Call super to compute the static response to the current input.
         out = super()._compute_static_io(t, x, u)
-
-        # Remove the noise vector so it is sampled dynamically again.
-        for sys in self.syslist:
-            # noinspection PyProtectedMember
-            sys._current_params.pop('_v', None)
 
         return out
 
