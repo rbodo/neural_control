@@ -16,6 +16,61 @@ DIMENSION_MAP = {'y0': 'control', 'x0': 'x', 'x1': 'v', 'x2': r'$\hat{x}$',
                  'x3': r'$\hat{v}$', 'c0': 'cost'}
 
 
+class TimeSeriesVariable:
+    def __init__(self, name, label=None, ndim=None, column_labels=None):
+        self.name = name
+        self.label = label or name  # Human readable version of `name`.
+        self.ndim = ndim
+        if column_labels is None and ndim is not None:
+            column_labels = [self.name + str(i) for i in range(self.ndim)]
+        self.column_labels = column_labels
+
+        self.data = []
+        self.times = []
+        self.parameters = {}
+
+    def append_measurement(self, t, d, parameters):
+        self.times.append(t)
+        self.data.append(d)
+        for key, value in parameters.items():
+            self.parameters.setdefault(key, [])
+            self.parameters[key].append(value)
+
+
+    def get_dataframe(self):
+        data = pd.DataFrame(self.data, columns=self.column_labels)
+        data['times'] = self.times
+        for key, value in self.parameters.items():
+            data[key] = value
+        data = data.melt(id_vars=['times']+list(self.parameters.keys()),
+                         value_vars=self.column_labels, value_name='value',
+                         var_name='dimension')
+        data['variable'] = self.label
+        return data
+
+
+class Monitor:
+    def __init__(self):
+        self.variables = {}
+        self.parameters = {}
+
+    def add_variable(self, name, label=None, ndim=None, column_labels=None):
+        self.variables[name] = TimeSeriesVariable(name, label, ndim,
+                                                  column_labels)
+
+    def update_variables(self, t, **kwargs):
+        for key, value in kwargs.items():
+            self.variables[key].append_measurement(t, value, self.parameters)
+
+    def update_parameters(self, **kwargs):
+        self.parameters.update(kwargs)
+
+    def get_dataframe(self):
+        dfs = [data.get_dataframe() for data in self.variables.values()]
+
+        return pd.concat(dfs, ignore_index=True)
+
+
 def get_additive_white_gaussian_noise(cov, size=None, rng=None,
                                       method='cholesky'):
     if rng is None:
@@ -172,6 +227,40 @@ def mlp_controller_output(t, x, u, params):
     return y.asnumpy()[0]
 
 
+class StochasticLinearIOSystem(control.LinearIOSystem):
+
+    def __rdiv__(self, other):
+        control.StateSpace.__rdiv__(self, other)
+
+    def __div__(self, other):
+        control.StateSpace.__div__(self, other)
+
+    def __init__(self, linsys, W=None, V=None, rng=None, **kwargs):
+        super().__init__(linsys, **kwargs)
+        self.W = W
+        self.V = V
+        self.rng = rng
+
+    def integrate(self, t, x, u, method='euler-maruyama'):
+        dxdt = super().dynamics(t, x, u)
+
+        if method == 'euler-maruyama':
+            x_new = x + self.dt * dxdt
+            if self.W is not None:
+                dW = get_additive_white_gaussian_noise(
+                    np.eye(len(x)) * np.sqrt(self.dt), rng=self.rng)
+                x_new += np.dot(self.W, dW)
+            return x_new
+        else:
+            raise NotImplementedError
+
+    def output(self, t, x, u):
+        out = super().output(t, x, u)
+        if self.V is not None:
+            out += get_additive_white_gaussian_noise(self.V, rng=self.rng)
+        return out
+
+
 class StochasticInterconnectedSystem(control.InterconnectedSystem):
     """Stochastic version of an `InterconnectedSystem`.
 
@@ -260,6 +349,30 @@ def plot_timeseries(t, u=None, y=None, x=None, c=None, dimension_map=None,
     plt.show()
 
 
+def plot_timeseries2(df, path=None):
+
+    n = df['variable'].nunique()
+    # Create line plot with one subplot for each variable and one line for each
+    # dimension.
+    g = sns.relplot(data=df, x='times', y='value', hue='dimension',
+                    row='variable', kind='line', aspect=2, height=10/n)
+
+    # Add borders.
+    sns.despine(right=False, top=False)
+
+    # noinspection PyProtectedMember
+    g._legend.set_title(None)
+
+    for ax in g.axes.ravel():
+        title = ax.get_title()
+        title = title.split(' = ')[1]
+        ax.set_title(title)
+
+    if path is not None:
+        g.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
 def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
                        start_points=None, n=10, xt=None, path=None):
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
@@ -304,7 +417,7 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
         # Compute derivatives at each grid node.
         dx = np.empty_like(x)
         for i, j in np.ndindex(shape2d):
-            dx[:, i, j] = odefunc(0, x[:, i, j], [])
+            dx[:, i, j] = odefunc(0, x[:, i, j], [0])
 
         # Draw streamlines and arrows.
         plt.streamplot(grid[0], grid[1], dx[0], dx[1],
