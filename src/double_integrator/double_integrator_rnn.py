@@ -12,7 +12,7 @@ from src.double_integrator.train_rnn import RNNModel
 from src.double_integrator.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, plot_phase_diagram, rnn_controller_output,
-    rnn_controller_dynamics, get_lqr_cost)
+    rnn_controller_dynamics, get_lqr_cost_vectorized)
 
 
 class DiRnn(DI):
@@ -122,7 +122,7 @@ def main(config):
 
         if Q is not None and R is not None:
             # Compute cost, using only true, not observed, states.
-            c = get_lqr_cost(x[:di_rnn.n_x_process], y, Q, R)
+            c = get_lqr_cost_vectorized(x[:di_rnn.n_x_process], y, Q, R)
             print("Total cost: {}.".format(np.sum(c)))
 
         path_out = config.paths.PATH_OUT

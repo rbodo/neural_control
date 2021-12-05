@@ -50,7 +50,9 @@ def main(config):
     path_out = config.paths.PATH_OUT
     process_noise = config.process.PROCESS_NOISE
     observation_noise = config.process.OBSERVATION_NOISE
-    dt = config.simulation.T / config.simulation.NUM_STEPS
+    T = config.simulation.T
+    num_steps = config.simulation.NUM_STEPS
+    dt = T / num_steps
 
     # Create double integrator in open loop configuration.
     di = DI(process_noise, observation_noise, dt, RNG)
@@ -60,16 +62,14 @@ def main(config):
     X0 = di.get_initial_states(config.process.STATE_MEAN,
                                config.process.STATE_COVARIANCE, 1)
 
-    times = np.linspace(0, config.simulation.T, config.simulation.NUM_STEPS,
-                        endpoint=False)
+    times = np.linspace(0, T, num_steps, endpoint=False)
     monitor = Monitor()
     monitor.add_variable('states', 'States', column_labels=['x', 'v'])
     monitor.add_variable('outputs', 'Output', column_labels=['y'])
 
     # Simulate the system without control.
     u = [0]
-    for i, x0 in enumerate(X0):
-        x = x0
+    for i, x in enumerate(X0):
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
         for t in times:
@@ -80,7 +80,7 @@ def main(config):
         df = monitor.get_dataframe()
 
         plot_timeseries2(df[df['experiment'] == i],
-                         path=os.path.join(path_out, 'timeseries'))
+                         path=os.path.join(path_out, 'timeseries_' + str(i)))
 
         d = OrderedDict(
             {'x': df[(df['dimension'] == 'x') &
@@ -89,7 +89,8 @@ def main(config):
                      (df['experiment'] == i)]['value']})
         plot_phase_diagram(d, odefunc=system_open.dynamics,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram'))
+                           path=os.path.join(path_out, 'phase_diagram_'
+                                             + str(i)))
 
 
 if __name__ == '__main__':

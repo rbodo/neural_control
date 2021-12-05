@@ -8,7 +8,7 @@ import numpy as np
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.double_integrator_open import DI
 from src.double_integrator.utils import (
-    process_dynamics, process_output, get_lqr_cost, DIMENSION_MAP,
+    process_dynamics, process_output, get_lqr_cost_vectorized, DIMENSION_MAP,
     plot_timeseries, plot_phase_diagram, lqr_controller_output)
 
 
@@ -43,7 +43,7 @@ class DiLqr(DI):
         return K
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R)
+        return get_lqr_cost_vectorized(x, u, self.Q, self.R)
 
     def _get_system_connections(self):
         # Connect input ports of process with output ports of controller.

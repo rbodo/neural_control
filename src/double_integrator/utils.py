@@ -118,6 +118,12 @@ def get_observation_noise(V):
 
 
 def get_lqr_cost(x, u, Q, R):
+    """"Compute cost of an LQR system."""
+
+    return - np.dot(x, np.dot(Q, x)) - np.dot(u, np.dot(R, u))
+
+
+def get_lqr_cost_vectorized(x, u, Q, R):
     """"Vectorized version for computing cost of an LQR system."""
 
     # Apply sum-product instead of matmul because we are dealing with a stack
