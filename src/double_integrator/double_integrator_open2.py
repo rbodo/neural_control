@@ -1,6 +1,5 @@
 import os
 import sys
-from collections import OrderedDict
 
 import control
 import numpy as np
@@ -77,20 +76,14 @@ def main(config):
             y = system_open.output(t, x, u)
             monitor.update_variables(t, states=x, outputs=y)
 
-        df = monitor.get_dataframe()
+        path = os.path.join(path_out, 'timeseries_' + str(i))
+        plot_timeseries2(monitor.get_last_experiment(), path=path)
 
-        plot_timeseries2(df[df['experiment'] == i],
-                         path=os.path.join(path_out, 'timeseries_' + str(i)))
-
-        d = OrderedDict(
-            {'x': df[(df['dimension'] == 'x') &
-                     (df['experiment'] == i)]['value'],
-             'v': df[(df['dimension'] == 'v') &
-                     (df['experiment'] == i)]['value']})
-        plot_phase_diagram(d, odefunc=system_open.dynamics,
+        path = os.path.join(path_out, 'phase_diagram_' + str(i))
+        plot_phase_diagram(monitor.get_last_trajectory(),
+                           odefunc=system_open.dynamics,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_'
-                                             + str(i)))
+                           path=path)
 
 
 if __name__ == '__main__':

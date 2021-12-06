@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import control
 import numpy as np
 import pandas as pd
@@ -19,7 +21,7 @@ DIMENSION_MAP = {'y0': 'control', 'x0': 'x', 'x1': 'v', 'x2': r'$\hat{x}$',
 class TimeSeriesVariable:
     def __init__(self, name, label=None, ndim=None, column_labels=None):
         self.name = name
-        self.label = label or name  # Human readable version of `name`.
+        self.label = label or name  # Human-readable version of `name`.
         self.ndim = ndim
         if column_labels is None and ndim is not None:
             column_labels = [self.name + str(i) for i in range(self.ndim)]
@@ -53,22 +55,68 @@ class Monitor:
     def __init__(self):
         self.variables = {}
         self.parameters = {}
+        self._is_variable_updated = False
+        self._dataframe = None
 
+    class Decorators:
+
+        @classmethod
+        def mark_modified(cls, f):
+            def inner(self, *args, **kwargs):
+                self._is_variable_updated = True
+                return f(self, *args, **kwargs)
+            return inner
+
+        @classmethod
+        def check_update_dataframe(cls, f):
+            def inner(self, *args, **kwargs):
+                if self._is_variable_updated:
+                    self._update_dataframe()
+                return f(self, *args, **kwargs)
+            return inner
+
+    @Decorators.mark_modified
     def add_variable(self, name, label=None, ndim=None, column_labels=None):
         self.variables[name] = TimeSeriesVariable(name, label, ndim,
                                                   column_labels)
 
+    @Decorators.mark_modified
     def update_variables(self, t, **kwargs):
         for key, value in kwargs.items():
             self.variables[key].append_measurement(t, value, self.parameters)
 
+    @Decorators.mark_modified
     def update_parameters(self, **kwargs):
         self.parameters.update(kwargs)
 
-    def get_dataframe(self):
+    def _update_dataframe(self):
         dfs = [data.get_dataframe() for data in self.variables.values()]
+        self._dataframe = pd.concat(dfs, ignore_index=True)
+        self._is_variable_updated = False
 
-        return pd.concat(dfs, ignore_index=True)
+    @Decorators.check_update_dataframe
+    def get_dataframe(self):
+        return self._dataframe
+
+    @Decorators.check_update_dataframe
+    def get_last_experiment_id(self):
+        return self._dataframe['experiment'].max()
+
+    @Decorators.check_update_dataframe
+    def get_last_trajectory(self):
+        df = self._dataframe
+        i = self.get_last_experiment_id()
+        d = OrderedDict(
+            {'x': df[(df['dimension'] == 'x') &
+                     (df['experiment'] == i)]['value'],
+             'v': df[(df['dimension'] == 'v') &
+                     (df['experiment'] == i)]['value']})
+        return d
+
+    @Decorators.check_update_dataframe
+    def get_last_experiment(self):
+        i = self.get_last_experiment_id()
+        return self._dataframe[self._dataframe['experiment'] == i]
 
 
 def get_additive_white_gaussian_noise(cov, size=None, rng=None,
@@ -117,18 +165,18 @@ def get_observation_noise(V):
     return get_additive_white_gaussian_noise(V, rng=RNG)
 
 
-def get_lqr_cost(x, u, Q, R):
-    """"Compute cost of an LQR system."""
+def get_lqr_cost(x, u, Q, R, dt=1, sign=1):
+    """Compute cost of an LQR system."""
 
-    return - np.dot(x, np.dot(Q, x)) - np.dot(u, np.dot(R, u))
+    return sign * dt * (np.dot(x, np.dot(Q, x)) + np.dot(u, np.dot(R, u)))
 
 
-def get_lqr_cost_vectorized(x, u, Q, R):
-    """"Vectorized version for computing cost of an LQR system."""
+def get_lqr_cost_vectorized(x, u, Q, R, dt=1, sign=1):
+    """Vectorized version for computing cost of an LQR system."""
 
     # Apply sum-product instead of matmul because we are dealing with a stack
     # of x and u vectors (one for each time step).
-    return - np.sum(x * (Q @ x), 0) - np.sum(u * (R @ u), 0)
+    return sign * dt * (np.sum(x * (Q @ x), 0) + np.sum(u * (R @ u), 0))
 
 
 # noinspection PyUnusedLocal
@@ -247,12 +295,12 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         self.V = V
         self.rng = rng
 
-    def integrate(self, t, x, u, method='euler-maruyama'):
+    def integrate(self, t, x, u, method='euler-maruyama', deterministic=False):
         dxdt = super().dynamics(t, x, u)
 
         if method == 'euler-maruyama':
             x_new = x + self.dt * dxdt
-            if self.W is not None:
+            if self.W is not None and not deterministic:
                 dW = get_additive_white_gaussian_noise(
                     np.eye(len(x)) * np.sqrt(self.dt), rng=self.rng)
                 x_new += np.dot(self.W, dW)
@@ -260,9 +308,9 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         else:
             raise NotImplementedError
 
-    def output(self, t, x, u):
+    def output(self, t, x, u, deterministic=False):
         out = super().output(t, x, u)
-        if self.V is not None:
+        if self.V is not None and not deterministic:
             out += get_additive_white_gaussian_noise(self.V, rng=self.rng)
         return out
 
@@ -315,7 +363,7 @@ def plot_timeseries(t, u=None, y=None, x=None, c=None, dimension_map=None,
         # Create a new column for each dimension of the vector variable.
         columns = [label+str(i) for i in range(len(data))]
 
-        # Apply human readable labels.
+        # Apply human-readable labels.
         if dimension_map is not None:
             columns = [dimension_map.get(ll, ll) for ll in columns]
 
@@ -361,7 +409,12 @@ def plot_timeseries2(df, path=None):
     # Create line plot with one subplot for each variable and one line for each
     # dimension.
     g = sns.relplot(data=df, x='times', y='value', hue='dimension',
-                    row='variable', kind='line', aspect=2, height=10/n)
+                    row='variable', kind='line', aspect=2, height=10/n,
+                    facet_kws={'sharey': False})
+    if 'Cost' in g.axes_dict:
+        g.axes_dict['Cost'].set(yscale='log')
+
+    g.set_axis_labels('Time', '')
 
     # Add borders.
     sns.despine(right=False, top=False)

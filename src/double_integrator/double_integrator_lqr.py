@@ -27,8 +27,7 @@ class DiLqr(DI):
         self.D = np.zeros((self.n_y_process, self.n_u_process))
 
         # State cost matrix:
-        self.Q = np.zeros((self.n_x_process, self.n_x_process))
-        self.Q[0, 0] = q  # Only position contributes to cost.
+        self.Q = q * np.eye(self.n_x_process)
 
         # Control cost matrix:
         self.R = r * np.eye(self.n_y_control)
@@ -61,13 +60,14 @@ class DiLqr(DI):
         return connections
 
     def get_system(self):
-
+        dt = None
         system_open = control.NonlinearIOSystem(
             process_dynamics, process_output,
             inputs=self.n_u_process,
             outputs=self.n_y_process,
             states=self.n_x_process,
             name='system_open',
+            dt=dt,
             params={'A': self.A,
                     'B': self.B,
                     'C': self.C,
@@ -79,12 +79,14 @@ class DiLqr(DI):
             inputs=self.n_u_control,
             outputs=self.n_y_control,
             name='control',
+            dt=dt,
             params={'K': self.K})
 
         connections = self._get_system_connections()
 
         system_closed = control.InterconnectedSystem(
-            [system_open, controller], connections, outlist=['control.y[0]'])
+            [system_open, controller], connections, outlist=['control.y[0]'],
+        dt=dt)
 
         return system_closed
 

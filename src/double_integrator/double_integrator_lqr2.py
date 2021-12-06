@@ -1,6 +1,5 @@
 import os
 import sys
-from collections import OrderedDict
 
 import control
 import numpy as np
@@ -26,8 +25,7 @@ class DiLqr(DI):
         self.D = np.zeros((self.n_y_process, self.n_u_process))
 
         # State cost matrix:
-        self.Q = np.zeros((self.n_x_process, self.n_x_process))
-        self.Q[0, 0] = q  # Only position contributes to cost.
+        self.Q = q * np.eye(self.n_x_process)
 
         # Control cost matrix:
         self.R = r * np.eye(self.n_y_control)
@@ -42,10 +40,13 @@ class DiLqr(DI):
         return K
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R)
+        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
 
     def get_control(self, x):
         return -self.K.dot(x)
+
+    def get_closed_loop(self, t, x, u):
+        return self.system.dynamics(t, x, self.get_control(x) + u)
 
 
 def main(config):
@@ -85,24 +86,14 @@ def main(config):
 
             monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
 
-        df = monitor.get_dataframe()
+        path = os.path.join(path_out, 'timeseries_lqr_' + str(i))
+        plot_timeseries2(monitor.get_last_experiment(), path=path)
 
-        plot_timeseries2(df[df['experiment'] == i],
-                         path=os.path.join(path_out, 'timeseries_lqr_'
-                                           + str(i)))
-
-        d = OrderedDict(
-            {'x': df[(df['dimension'] == 'x') &
-                     (df['experiment'] == i)]['value'],
-             'v': df[(df['dimension'] == 'v') &
-                     (df['experiment'] == i)]['value']})
-
-        f = lambda _t, _x, _u: system_open.dynamics(_t, _x,
-                                                    di_lqr.get_control(_x))
-        plot_phase_diagram(d, odefunc=f,
+        path = os.path.join(path_out, 'phase_diagram_lqr_' + str(i))
+        plot_phase_diagram(monitor.get_last_trajectory(),
+                           odefunc=di_lqr.get_closed_loop,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_lqr_'
-                                             + str(i)))
+                           path=path)
 
 
 if __name__ == '__main__':
