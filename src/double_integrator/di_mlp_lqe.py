@@ -1,56 +1,42 @@
 import os
 import sys
 
-import control
 import numpy as np
+import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.di_lqr import DiLqr
+from src.double_integrator.di_lqg import DiLqg
+from src.double_integrator.train_mlp import MLPModel
 from src.double_integrator.utils import (
-    plot_timeseries, plot_phase_diagram, RNG, Monitor)
+    plot_phase_diagram, RNG, Monitor, plot_timeseries)
 
 
-class DiLqg(DiLqr):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
+class DiMlpLqe(DiLqg):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 num_hidden=1, path_model=None):
         super().__init__(var_x, var_y, dt, rng, q, r)
 
-        self.n_y_process = 1  # Number of process outputs
-
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Only observe position.
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
-
-        # Kalman gain matrix:
-        self.L = self.get_Kalman_gain()
-
-    def get_Kalman_gain(self):
-        # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
-        # equation, and eigenvalues F of estimator poles A-LC.
-        L, P, F = control.lqe(self.A, np.eye(self.n_x_process), self.C, self.W,
-                              self.V)
-        return L
-
-    def apply_filter(self, t, mu, Sigma, u, y, asymptotic=True):
-        mu = self.system.step(t, mu, u, deterministic=True)
-
-        if asymptotic:
-            L = self.L
+        self.model = MLPModel(num_hidden)
+        # self.mlp.hybridize()
+        if path_model is None:
+            self.model.initialize()
         else:
-            Sigma = self.A @ Sigma @ self.A.T + self.W
-            L = Sigma @ self.C.T @ np.linalg.inv(self.C @ Sigma @ self.C.T +
-                                                 self.V)
-            Sigma = (1 - L @ self.C) @ Sigma
+            self.model.load_parameters(path_model)
 
-        mu += self.dt * L @ (y - self.system.output(t, mu, u,
-                                                    deterministic=True))
+    def get_control(self, x, u=None):
+        # Add dummy dimension for batch size.
+        x = mx.nd.array(np.expand_dims(x, 0))
+        u = self.model(x)
+        return u.asnumpy()[0]
 
-        return mu, Sigma
+    def step(self, t, x, u):
+        y = self.system.output(t, x, u)
+        return self.system.dynamics(t, x, self.get_control(y) + u)
 
 
 def main(config):
 
-    label = 'lqg'
+    label = 'mlp_lqe'
     path_out = config.paths.PATH_OUT
     process_noise = config.process.PROCESS_NOISE
     observation_noise = config.process.OBSERVATION_NOISE
@@ -60,10 +46,12 @@ def main(config):
     mu0 = config.process.STATE_MEAN
     Sigma0 = config.process.STATE_COVARIANCE * np.eye(len(mu0))
 
-    # Create double integrator with LQG feedback.
-    system_closed = DiLqg(process_noise, observation_noise, dt, RNG,
-                          config.controller.cost.lqr.Q,
-                          config.controller.cost.lqr.R)
+    # Create double integrator with MLP feedback.
+    system_closed = DiMlpLqe(process_noise, observation_noise, dt, RNG,
+                             config.controller.cost.lqr.Q,
+                             config.controller.cost.lqr.R,
+                             config.model.NUM_HIDDEN,
+                             config.paths.PATH_MODEL)
     system_open = system_closed.system
 
     # Sample some initial states.
@@ -80,8 +68,9 @@ def main(config):
     monitor.add_variable('control', 'Control', column_labels=['u'])
     monitor.add_variable('cost', 'Cost', column_labels=['c'])
 
-    # Simulate the system with LQG control.
+    # Simulate the system with MLP control.
     for i, x in enumerate(X0):
+
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
         x_est = mu0
@@ -109,7 +98,7 @@ def main(config):
 if __name__ == '__main__':
 
     _config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_lqg.py')
+                         'double_integrator/configs/config_mlp_lqe.py')
 
     main(_config)
 

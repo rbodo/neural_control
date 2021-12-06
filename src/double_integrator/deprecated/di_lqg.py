@@ -6,11 +6,12 @@ import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.double_integrator_lqr import DiLqr
-from src.double_integrator.utils import (
+from src.double_integrator.deprecated.di_lqr import DiLqr
+from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
-    DIMENSION_MAP, plot_timeseries, plot_phase_diagram,
-    lqe_dynamics, lqe_filter_output, lqr_controller_output)
+    DIMENSION_MAP, plot_timeseries, lqe_dynamics, lqe_filter_output,
+    lqr_controller_output)
+from src.double_integrator.utils import plot_phase_diagram
 
 
 class DiLqg(DiLqr):

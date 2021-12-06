@@ -6,9 +6,9 @@ import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.utils import (
-    process_dynamics, process_output, get_initial_states, DIMENSION_MAP,
-    plot_timeseries, plot_phase_diagram)
+from src.double_integrator.deprecated.utils import (
+    process_dynamics, process_output, DIMENSION_MAP, plot_timeseries)
+from src.double_integrator.utils import plot_phase_diagram, get_initial_states
 
 
 class DI:

@@ -18,6 +18,7 @@ class RNNModel(mx.gluon.HybridBlock):
         super().__init__(**kwargs)
 
         self.num_hidden = num_hidden
+        self.num_layers = num_layers
 
         with self.name_scope():
             self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation)
