@@ -5,7 +5,7 @@ import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.double_integrator_lqr2 import DiLqr
+from src.double_integrator.di_lqr import DiLqr
 from src.double_integrator.utils import (
     plot_timeseries2, plot_phase_diagram, RNG, Monitor)
 
