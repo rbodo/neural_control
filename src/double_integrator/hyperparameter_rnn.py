@@ -6,6 +6,7 @@ import logging
 import optuna
 import numpy as np
 import mxnet as mx
+from mxnet import autograd
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
@@ -59,6 +60,7 @@ class RNNModel(mx.gluon.HybridBlock):
                                              in_units=num_hidden,
                                              flatten=False)
 
+    # noinspection PyUnusedLocal
     def hybrid_forward(self, F, x, *args, **kwargs):
         output, hidden = self.rnn(x, args[0])
         decoded = self.decoder(output)
@@ -72,7 +74,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
     print(context)
 
     config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_rnn.py')
+                        'double_integrator/configs/config_rnn.py')
 
     path_dataset = config.paths.PATH_TRAINING_DATA
     batch_size = config.training.BATCH_SIZE
@@ -118,7 +120,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
             data = mx.nd.moveaxis(data, -1, 0)
             data = data.as_in_context(context)
             label = label.as_in_context(context)
-            with mx.autograd.record():
+            with autograd.record():
                 output, hidden = model(data, hidden_init)
                 output = mx.nd.moveaxis(output, 0, -1)
                 loss = loss_function(output, label)
@@ -130,7 +132,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
             train_loss += loss.mean().asscalar()
 
         for data, label in test_data_loader:
-            data = np.moveaxis(data, -1, 0)
+            data = mx.nd.moveaxis(data, -1, 0)
             data = data.as_in_context(context)
             label = label.as_in_context(context)
             output, hidden = model(data, hidden_init)

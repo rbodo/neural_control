@@ -117,7 +117,8 @@ def main(config):
             x0[-di_rnn.n_x_control:] = _x0[0].asnumpy()
 
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
-                                                return_x=True, solve_ivp_method='RK45')
+                                                return_x=True,
+                                                solve_ivp_method='RK45')
 
         # Keep only control signal from output.
         y = y[:di_rnn.n_y_control]

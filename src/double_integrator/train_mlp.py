@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 import mxnet as mx
+from mxnet import autograd
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
@@ -22,6 +23,7 @@ class MLPModel(mx.gluon.HybridBlock):
             self.hidden = mx.gluon.nn.Dense(num_hidden, activation='relu')
             self.output = mx.gluon.nn.Dense(num_outputs, activation='tanh')
 
+    # noinspection PyUnusedLocal
     def hybrid_forward(self, F, x, *args, **kwargs):
         return self.output(self.hidden(x))
 
@@ -33,7 +35,7 @@ def main():
     print(context)
 
     config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_mlp.py')
+                        'double_integrator/configs/config_mlp.py')
 
     num_hidden = config.model.NUM_HIDDEN
     num_outputs = 1
@@ -78,7 +80,7 @@ def main():
         for data, label in train_data_loader:
             data = data.as_in_context(context)
             label = label.as_in_context(context)
-            with mx.autograd.record():
+            with autograd.record():
                 output = model(data)
                 loss = loss_function(output, label)
 

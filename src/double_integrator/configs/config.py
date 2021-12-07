@@ -45,7 +45,7 @@ def get_config(
     :param config_paths: List of config paths or string that contains comma
         separated list of config paths.
     :param opts: Config options (keys, values) in a list (e.g., passed from
-        command line into the config. For example,
+        command line into the config). For example,
         :py:`opts = ['FOO.BAR', 0.5]`. Argument can be used for parameter
         sweeping or quick tests.
     """

@@ -88,7 +88,7 @@ class DiLqr(DI):
 
         system_closed = control.InterconnectedSystem(
             [system_open, controller], connections, outlist=['control.y[0]'],
-        dt=dt)
+            dt=dt)
 
         return system_closed
 

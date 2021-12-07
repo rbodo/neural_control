@@ -32,7 +32,6 @@ class TimeSeriesVariable:
             self.parameters.setdefault(key, [])
             self.parameters[key].append(value)
 
-
     def get_dataframe(self):
         data = pd.DataFrame(self.data, columns=self.column_labels)
         data['times'] = self.times
@@ -145,7 +144,7 @@ def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky'):
 
 def get_initial_states(mean, cov, num_states, n=1):
     if np.isscalar(mean):
-        mean = mean * np.ones(num_states)
+        mean *= np.ones(num_states)
     else:
         assert np.array(mean).shape == (num_states,)
 
