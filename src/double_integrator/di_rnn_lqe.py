@@ -95,7 +95,6 @@ def main(config):
             monitor.update_variables(t, states=x, outputs=y, control=u, cost=c,
                                      state_estimates=x_est)
 
-
         path = os.path.join(path_out, 'timeseries_{}_{}'.format(label, i))
         plot_timeseries(monitor.get_last_experiment(), path=path)
 

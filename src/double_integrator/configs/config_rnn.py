@@ -13,7 +13,7 @@ cfg.model.ACTIVATION = 'relu'
 
 cfg.training.BATCH_SIZE = 32
 cfg.training.LEARNING_RATE = 1e-3
-cfg.training.NUM_EPOCHS = 35
+cfg.training.NUM_EPOCHS = 10
 cfg.training.OPTIMIZER = 'adam'
 
 cfg.simulation.T = 10
