@@ -61,16 +61,16 @@ def main():
 
     data = pd.read_pickle(os.path.join(path_dataset, 'lqg.pkl'))
     if use_filter:
-        x0 = data[data['dimension'] == r'$\hat{x}$']['value']
-        x1 = data[data['dimension'] == r'$\hat{v}$']['value']
+        x0 = data[r'$\hat{x}$']
+        x1 = data[r'$\hat{v}$']
         x0 = np.reshape(x0.to_numpy(), (-1, num_steps))
         x1 = np.reshape(x1.to_numpy(), (-1, num_steps))
         x = np.stack([x0, x1], 1)
     else:
-        x = data[data['dimension'] == 'y']['value']
+        x = data['y']
         x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
     x = x.astype(np.float32)
-    y = data[data['dimension'] == 'u']['value']
+    y = data['u']
     y = np.reshape(y.to_numpy(), (-1, num_outputs, num_steps))
     y = y.astype(np.float32)
 
