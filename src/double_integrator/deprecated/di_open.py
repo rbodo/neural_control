@@ -8,7 +8,8 @@ import numpy as np
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, DIMENSION_MAP, plot_timeseries)
-from src.double_integrator.utils import plot_phase_diagram, get_initial_states
+from src.double_integrator.utils import get_initial_states
+from src.double_integrator.plotting import plot_phase_diagram
 
 
 class DI:

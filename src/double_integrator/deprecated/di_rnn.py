@@ -13,8 +13,8 @@ from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, rnn_controller_output,
     rnn_controller_dynamics)
-from src.double_integrator.utils import plot_phase_diagram, \
-    get_lqr_cost_vectorized
+from src.double_integrator.utils import get_lqr_cost_vectorized
+from src.double_integrator.plotting import plot_phase_diagram
 
 
 class DiRnn(DI):

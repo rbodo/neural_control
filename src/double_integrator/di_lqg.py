@@ -1,51 +1,12 @@
 import os
 import sys
 
-import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.di_lqr import DiLqr
-from src.double_integrator.utils import (
-    plot_timeseries, plot_phase_diagram, RNG, Monitor)
-
-
-class DiLqg(DiLqr):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
-        super().__init__(var_x, var_y, dt, rng, q, r)
-
-        self.n_y_process = 1  # Number of process outputs
-
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Only observe position.
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
-
-        # Kalman gain matrix:
-        self.L = self.get_Kalman_gain()
-
-    def get_Kalman_gain(self):
-        # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
-        # equation, and eigenvalues F of estimator poles A-LC.
-        L, P, F = control.lqe(self.A, np.eye(self.n_x_process), self.C, self.W,
-                              self.V)
-        return L
-
-    def apply_filter(self, t, mu, Sigma, u, y, asymptotic=True):
-        mu = self.system.step(t, mu, u, deterministic=True)
-
-        if asymptotic:
-            L = self.L
-        else:
-            Sigma = self.A @ Sigma @ self.A.T + self.W
-            L = Sigma @ self.C.T @ np.linalg.inv(self.C @ Sigma @ self.C.T +
-                                                 self.V)
-            Sigma = (1 - L @ self.C) @ Sigma
-
-        mu += self.dt * L @ (y - self.system.output(t, mu, u,
-                                                    deterministic=True))
-
-        return mu, Sigma
+from src.double_integrator.control_systems import DiLqg
+from src.double_integrator.utils import RNG, Monitor
+from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
 
 
 def main(config):
@@ -68,7 +29,7 @@ def main(config):
 
     # Sample some initial states.
     n = 1
-    X0 = system_closed.get_initial_states(mu0, Sigma0, n)
+    X0 = system_closed.get_initial_states(mu0, Sigma0, n, RNG)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -101,9 +62,8 @@ def main(config):
 
         path = os.path.join(path_out, 'phase_diagram_{}_{}'.format(label, i))
         plot_phase_diagram(monitor.get_last_trajectory(),
-                           odefunc=system_closed.step,
-                           xt=config.controller.STATE_TARGET,
-                           path=path)
+                           odefunc=system_closed.step, rng=RNG,
+                           xt=config.controller.STATE_TARGET, path=path)
 
 
 if __name__ == '__main__':

@@ -5,8 +5,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 import mxnet as mx
 
-from src.double_integrator.utils import (
-    get_additive_white_gaussian_noise, RNG, get_observation_noise)
+from src.double_integrator.utils import get_additive_white_gaussian_noise, RNG
 
 sns.set_theme(style='whitegrid')
 
@@ -203,3 +202,7 @@ def plot_timeseries(t, u=None, y=None, x=None, c=None, dimension_map=None,
     if path is not None:
         g.savefig(path, bbox_inches='tight')
     plt.show()
+
+
+def get_observation_noise(V):
+    return get_additive_white_gaussian_noise(V, rng=RNG)

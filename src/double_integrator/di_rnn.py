@@ -2,53 +2,11 @@ import os
 import sys
 
 import numpy as np
-import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.di_open import DI
-from src.double_integrator.train_rnn import RNNModel
-from src.double_integrator.utils import (
-    plot_phase_diagram, get_lqr_cost, RNG, Monitor, plot_timeseries)
-
-
-class DiRnn(DI):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, num_layers=1, path_model=None):
-        super().__init__(var_x, var_y, dt, rng)
-        # Here we use the noisy state measurements as input to the RNN.
-
-        self.n_y_control = self.n_u_process
-
-        # State cost matrix:
-        self.Q = q * np.eye(self.n_x_process)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.n_y_control)
-
-        self.model = RNNModel(num_hidden, num_layers)
-        # self.rnn.hybridize()
-        if path_model is None:
-            self.model.initialize()
-        else:
-            self.model.load_parameters(path_model)
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
-
-    def get_control(self, x, u):
-        # Add dummy dimensions for shape [num_timesteps, batch_size,
-        # num_states].
-        u = mx.nd.array(np.expand_dims(u, [0, 1]))
-        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
-        x = mx.nd.array(np.reshape(x, (-1, 1, self.model.num_hidden)))
-        y, x = self.model(u, x)
-        return y.asnumpy().ravel(), x[0].asnumpy().ravel()
-
-    def step(self, t, x, u):
-        # Todo: The RNN hidden states need to be initialized better.
-        x_rnn = np.zeros((self.model.num_layers, self.model.num_hidden))
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(x_rnn, y)[0] + u)
+from src.double_integrator.control_systems import DiRnn
+from src.double_integrator.utils import RNG, Monitor
+from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
 
 
 def main(config):
@@ -73,7 +31,8 @@ def main(config):
     # Sample some initial states.
     n = 1
     X0 = system_closed.get_initial_states(config.process.STATE_MEAN,
-                                          config.process.STATE_COVARIANCE, n)
+                                          config.process.STATE_COVARIANCE, n,
+                                          RNG)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -103,10 +62,8 @@ def main(config):
         plot_timeseries(monitor.get_last_experiment(), path=path)
 
         path = os.path.join(path_out, 'phase_diagram_{}_{}'.format(label, i))
-        plot_phase_diagram(monitor.get_last_trajectory(),
-                           # odefunc=system_closed.step,
-                           xt=config.controller.STATE_TARGET,
-                           path=path)
+        plot_phase_diagram(monitor.get_last_trajectory(), rng=RNG,
+                           xt=config.controller.STATE_TARGET, path=path)
 
 
 if __name__ == '__main__':

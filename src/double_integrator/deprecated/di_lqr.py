@@ -10,8 +10,8 @@ from src.double_integrator.deprecated.di_open import DI
 from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, DIMENSION_MAP, plot_timeseries,
     lqr_controller_output)
-from src.double_integrator.utils import plot_phase_diagram, \
-    get_lqr_cost_vectorized
+from src.double_integrator.utils import get_lqr_cost_vectorized
+from src.double_integrator.plotting import plot_phase_diagram
 
 
 class DiLqr(DI):

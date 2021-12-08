@@ -13,7 +13,7 @@ from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, rnn_controller_output, lqe_dynamics,
     lqe_filter_output, rnn_controller_dynamics)
-from src.double_integrator.utils import plot_phase_diagram
+from src.double_integrator.plotting import plot_phase_diagram
 
 
 class DiRnnLqe(DiLqg):

@@ -2,36 +2,11 @@ import os
 import sys
 
 import numpy as np
-import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.di_lqg import DiLqg
-from src.double_integrator.train_mlp import MLPModel
-from src.double_integrator.utils import (
-    plot_phase_diagram, RNG, Monitor, plot_timeseries)
-
-
-class DiMlpLqe(DiLqg):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, path_model=None):
-        super().__init__(var_x, var_y, dt, rng, q, r)
-
-        self.model = MLPModel(num_hidden)
-        # self.mlp.hybridize()
-        if path_model is None:
-            self.model.initialize()
-        else:
-            self.model.load_parameters(path_model)
-
-    def get_control(self, x, u=None):
-        # Add dummy dimension for batch size.
-        x = mx.nd.array(np.expand_dims(x, 0))
-        u = self.model(x)
-        return u.asnumpy()[0]
-
-    def step(self, t, x, u):
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(y) + u)
+from src.double_integrator.control_systems import DiMlpLqe
+from src.double_integrator.utils import RNG, Monitor
+from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
 
 
 def main(config):
@@ -56,7 +31,7 @@ def main(config):
 
     # Sample some initial states.
     n = 1
-    X0 = system_closed.get_initial_states(mu0, Sigma0, n)
+    X0 = system_closed.get_initial_states(mu0, Sigma0, n, RNG)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -90,9 +65,8 @@ def main(config):
 
         path = os.path.join(path_out, 'phase_diagram_{}_{}'.format(label, i))
         plot_phase_diagram(monitor.get_last_trajectory(),
-                           odefunc=system_closed.step,
-                           xt=config.controller.STATE_TARGET,
-                           path=path)
+                           odefunc=system_closed.step, rng=RNG,
+                           xt=config.controller.STATE_TARGET, path=path)
 
 
 if __name__ == '__main__':

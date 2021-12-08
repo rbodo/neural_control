@@ -12,7 +12,7 @@ from src.double_integrator.deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, mlp_controller_output, lqe_dynamics,
     lqe_filter_output)
-from src.double_integrator.utils import plot_phase_diagram
+from src.double_integrator.plotting import plot_phase_diagram
 
 
 class DiMlpLqe(DiLqg):
