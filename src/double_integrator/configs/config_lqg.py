@@ -1,7 +1,7 @@
 from src.double_integrator.configs.config import config as cfg
 
-# cfg.paths.PATH_OUT = 'C:\\Users\\u714174\\Data\\neural_control\\figures'
-cfg.paths.PATH_OUT = '/home/bodrue/Data/neural_control/figures'
+cfg.paths.PATH_OUT = \
+    '/home/bodrue/Data/neural_control/double_integrator/lqg/figures'
 
 cfg.simulation.T = 10
 cfg.simulation.NUM_STEPS = 1000

@@ -1,5 +1,5 @@
 """This file defines the default values for scripts in double_integrator."""
-
+import os
 from typing import List, Optional, Union
 
 from yacs.config import CfgNode
@@ -8,9 +8,9 @@ config = CfgNode()
 
 config.SEED = 42
 config.paths = CfgNode()
-config.paths.PATH_OUT = '..'  # Where to save plots
-config.paths.PATH_TRAINING_DATA = '..'  # Where to save or load training data
-config.paths.PATH_MODEL = '..'
+config.paths.PATH_OUT = './'  # Where to save plots
+config.paths.PATH_TRAINING_DATA = './'  # Where to save or load training data
+config.paths.PATH_MODEL = './'
 
 config.training = CfgNode()
 config.training.BATCH_SIZE = 32
@@ -67,4 +67,10 @@ def get_config(
         _config.merge_from_list(opts)
 
     _config.freeze()
+    with open(_config.paths.PATH_OUT + '_config.txt', 'w') as f:
+        f.write(_config.dump())
+
+    for p in _config.paths.values():
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+
     return _config

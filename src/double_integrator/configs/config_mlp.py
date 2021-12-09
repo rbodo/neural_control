@@ -1,10 +1,12 @@
 from yacs.config import CfgNode
 
 from src.double_integrator.configs.config import config as cfg
+from src.double_integrator.configs.config_collect_training_data import cfg as c
 
-cfg.paths.PATH_OUT = '/home/bodrue/Data/neural_control/figures'
-cfg.paths.PATH_TRAINING_DATA = '/home/bodrue/Data/neural_control/training_data'
-cfg.paths.PATH_MODEL = '/home/bodrue/Data/neural_control/models/mlp.params'
+base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp/'
+cfg.paths.PATH_OUT = base_path + 'figures'
+cfg.paths.PATH_TRAINING_DATA = c.paths.PATH_TRAINING_DATA
+cfg.paths.PATH_MODEL = base_path + 'models/mlp.params'
 
 cfg.model = CfgNode()
 cfg.model.NUM_HIDDEN = 10
