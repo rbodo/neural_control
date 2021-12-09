@@ -7,9 +7,10 @@ import mxnet as mx
 import pandas as pd
 from matplotlib import pyplot as plt
 from mxnet import autograd
-from sklearn.model_selection import train_test_split
 
 from src.double_integrator.configs.config import get_config
+
+from src.double_integrator.utils import split_train_test, select_noise_subset
 
 
 class RNNModel(mx.gluon.HybridBlock):
@@ -35,17 +36,59 @@ class RNNModel(mx.gluon.HybridBlock):
         return decoded, hidden
 
 
-def main():
-    num_cpus = min(os.cpu_count() // 2, 1)
-    num_gpus = mx.context.num_gpus()
-    context = mx.gpu(0) if num_gpus > 0 else mx.cpu()
-    print(context)
+def get_trajectories(data, num_steps, use_filter=False):
+    if use_filter:
+        print("Using Kalman-filtered state estimates.")
+        x0 = data[r'$\hat{x}$']
+        x1 = data[r'$\hat{v}$']
+        x0 = np.reshape(x0.to_numpy(), (-1, num_steps))
+        x1 = np.reshape(x1.to_numpy(), (-1, num_steps))
+        x = np.stack([x0, x1], 1)
+    else:
+        print("Using noisy partial observations.")
+        x = data['y']
+        x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
+    return x.astype(np.float32)
 
-    path_config = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                  'double_integrator/configs/config_rnn_lqe.py'
-    config = get_config(path_config)
 
-    use_filter = 'lqe' in path_config
+def get_control(data, num_steps):
+    y = data['u']
+    y = np.reshape(y.to_numpy(), (-1, 1, num_steps))
+    return y.astype(np.float32)
+
+
+def get_data_loaders(data, config):
+    num_cpus = max(os.cpu_count() // 2, 1)
+    num_steps = config.simulation.NUM_STEPS
+    batch_size = config.training.BATCH_SIZE
+    use_filter = '$\\hat{x}$' in data.columns
+    process_noise = config.process.PROCESS_NOISE
+    observation_noise = config.process.OBSERVATION_NOISE
+
+    data = select_noise_subset(data, process_noise, observation_noise)
+
+    data_train, data_test = split_train_test(data)
+
+    x_train = get_trajectories(data_train, num_steps, use_filter)
+    y_train = get_control(data_train, num_steps)
+    x_test = get_trajectories(data_test, num_steps, use_filter)
+    y_test = get_control(data_test, num_steps)
+
+    train_dataset = mx.gluon.data.dataset.ArrayDataset(x_train, y_train)
+    train_data_loader = mx.gluon.data.DataLoader(
+        train_dataset, batch_size, shuffle=True, num_workers=num_cpus,
+        last_batch='rollover')
+    test_dataset = mx.gluon.data.dataset.ArrayDataset(x_test, y_test)
+    test_data_loader = mx.gluon.data.DataLoader(
+        test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
+        last_batch='discard')
+
+    return test_data_loader, train_data_loader
+
+
+def main(config):
+    context = mx.gpu(1) if mx.context.num_gpus() > 0 else mx.cpu()
+
     num_hidden = config.model.NUM_HIDDEN
     num_layers = config.model.NUM_LAYERS
     num_outputs = 1
@@ -57,34 +100,9 @@ def main():
     num_epochs = config.training.NUM_EPOCHS
     optimizer = config.training.OPTIMIZER
 
-    num_steps = config.simulation.NUM_STEPS
+    data = pd.read_pickle(path_dataset)
 
-    data = pd.read_pickle(os.path.join(path_dataset, 'lqg.pkl'))
-    if use_filter:
-        x0 = data[r'$\hat{x}$']
-        x1 = data[r'$\hat{v}$']
-        x0 = np.reshape(x0.to_numpy(), (-1, num_steps))
-        x1 = np.reshape(x1.to_numpy(), (-1, num_steps))
-        x = np.stack([x0, x1], 1)
-    else:
-        x = data['y']
-        x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
-    x = x.astype(np.float32)
-    y = data['u']
-    y = np.reshape(y.to_numpy(), (-1, num_outputs, num_steps))
-    y = y.astype(np.float32)
-
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3)
-
-    train_dataset = mx.gluon.data.dataset.ArrayDataset(x_train, y_train)
-    train_data_loader = mx.gluon.data.DataLoader(
-        train_dataset, batch_size, shuffle=True, num_workers=num_cpus,
-        last_batch='rollover')
-
-    test_dataset = mx.gluon.data.dataset.ArrayDataset(x_test, y_test)
-    test_data_loader = mx.gluon.data.DataLoader(
-        test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
-        last_batch='discard')
+    test_data_loader, train_data_loader = get_data_loaders(data, config)
 
     model = RNNModel(num_hidden, num_layers, num_outputs, activation)
     model.hybridize()
@@ -145,6 +163,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    path_config = '/home/bodrue/PycharmProjects/neural_control/src/' \
+                  'double_integrator/configs/config_rnn_lqe.py'
+    _config = get_config(path_config)
+
+    main(_config)
 
     sys.exit()

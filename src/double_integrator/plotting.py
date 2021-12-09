@@ -94,15 +94,21 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
     plt.show()
 
 
+def float2str(x):
+    return f'{x:.2g}'
+
+
 def plot_trajectories_vs_noise(df, path=None):
     df = df[df['experiment'] == 0]
     col_wrap = int(np.sqrt(df['process_noise'].nunique()))
     g = sns.relplot(data=df, x='x', y='v', col='process_noise',
                     hue='observation_noise', col_wrap=col_wrap, kind='line',
                     palette=sns.color_palette('coolwarm', as_cmap=True),
-                    hue_norm=LogNorm())
+                    hue_norm=LogNorm(), alpha=0.5)
     g.set_titles("Process noise: {col_name:.2}")
     g.legend.set_title('Observation noise')
+    for t in g.legend.texts:
+        t.set_text(float2str(float(t.get_text())))
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -110,7 +116,6 @@ def plot_trajectories_vs_noise(df, path=None):
 
 
 def plot_cost_vs_noise(df, path=None):
-    df = df[(df['experiment'] == 0) | (df['experiment'] == 1)]
     col_wrap = int(np.sqrt(df['process_noise'].nunique()))
     g = sns.relplot(data=df, x='times', y='c', col='process_noise',
                     hue='observation_noise', col_wrap=col_wrap, kind='line',
@@ -120,6 +125,8 @@ def plot_cost_vs_noise(df, path=None):
     g.set_titles("Process noise: {col_name:.2}")
     g.legend.set_title('Observation noise')
     g.set_axis_labels('Time', 'Cost')
+    for t in g.legend.texts:
+        t.set_text(float2str(float(t.get_text())))
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -143,8 +150,6 @@ def plot_cost_heatmap(df, path=None, tail=None):
     std = df.drop(columns='mean', level=1).pivot(index='process_noise',
                                                  columns='observation_noise',
                                                  values=('c', 'std'))
-    def float2str(x):
-        return f'{x:g}'
 
     mean.rename(index=float2str, columns=float2str, inplace=True)
     std.rename(index=float2str, columns=float2str, inplace=True)
@@ -176,8 +181,8 @@ def plot_kalman_gain_vs_noise_levels(process_noise, observation_noise,
             out[i, j] = np.linalg.norm(system_closed.L, ord=np.inf)
             # out[i, j] = np.max(system_closed.L)
     df = pd.DataFrame(out,
-                      [f'{p:.2g}' for p in process_noise],
-                      [f'{p:.2g}' for p in observation_noise])
+                      [float2str(p) for p in process_noise],
+                      [float2str(p) for p in observation_noise])
     g = sns.heatmap(df, annot=True, fmt='.2f', linewidths=.5, square=True,)
                     # norm=LogNorm())
     g.set_xlabel('Observation noise')

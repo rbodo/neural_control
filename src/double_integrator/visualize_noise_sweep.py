@@ -6,6 +6,7 @@ import pandas as pd
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.plotting import plot_trajectories_vs_noise, \
     plot_cost_vs_noise, plot_cost_heatmap
+from src.double_integrator.utils import split_train_test
 
 
 def main(config):
@@ -15,8 +16,10 @@ def main(config):
 
     df = pd.read_pickle(path_data)
 
+    _, df = split_train_test(df)
+
     path = os.path.join(path_out, 'cost_heatmap.png')
-    plot_cost_heatmap(df, path)
+    plot_cost_heatmap(df, path, 50)
 
     path = os.path.join(path_out, 'trajectories_vs_noise.png')
     plot_trajectories_vs_noise(df, path)

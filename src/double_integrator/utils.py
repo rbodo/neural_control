@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -178,3 +179,18 @@ def get_lqr_cost_vectorized(x, u, Q, R, dt=1, sign=1):
     # Apply sum-product instead of matmul because we are dealing with a stack
     # of x and u vectors (one for each time step).
     return sign * dt * (np.sum(x * (Q @ x), 0) + np.sum(u * (R @ u), 0))
+
+
+def split_train_test(data: pd.DataFrame, f: float = 0.2) \
+        -> Tuple[pd.DataFrame, pd.DataFrame]:
+    num_total = data['experiment'].max() + 1
+    num_test = int(num_total * f)
+    test_idxs = np.linspace(0, num_total, num_test, endpoint=False, dtype=int)
+    mask_test = np.isin(data['experiment'], test_idxs)
+    mask_train = np.logical_not(mask_test)
+    return data[mask_train], data[mask_test]
+
+
+def select_noise_subset(data, process_noise, observation_noise):
+    return data[(data['process_noise'] == process_noise) &
+                (data['observation_noise'] == observation_noise)]

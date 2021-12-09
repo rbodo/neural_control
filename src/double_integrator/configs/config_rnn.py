@@ -3,7 +3,8 @@ from yacs.config import CfgNode
 from src.double_integrator.configs.config import config as cfg
 
 cfg.paths.PATH_OUT = '/home/bodrue/Data/neural_control/figures'
-cfg.paths.PATH_TRAINING_DATA = '/home/bodrue/Data/neural_control/training_data'
+cfg.paths.PATH_TRAINING_DATA = \
+    '/home/bodrue/Data/neural_control/training_data/lqg.pkl'
 cfg.paths.PATH_MODEL = '/home/bodrue/Data/neural_control/models/rnn.params'
 
 cfg.model = CfgNode()
