@@ -4,8 +4,8 @@ import os
 import pandas as pd
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.plotting import plot_trajectories_vs_noise, \
-    plot_cost_vs_noise, plot_cost_heatmap
+from src.double_integrator.plotting import (
+    plot_trajectories_vs_noise, plot_cost_vs_noise, plot_cost_heatmap)
 from src.double_integrator.utils import split_train_test
 
 
@@ -30,9 +30,11 @@ def main(config):
 
 if __name__ == '__main__':
 
-    _config = get_config(
-        '/home/bodrue/PycharmProjects/neural_control/src/double_integrator/'
-        'configs/config_collect_training_data.py')
+    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
+                'double_integrator/configs'
+    # filename = 'config_collect_training_data.py'
+    filename = 'config_rnn.py'
+    _config = get_config(os.path.join(base_path, filename))
 
     main(_config)
 

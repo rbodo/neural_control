@@ -1,8 +1,12 @@
-import numpy as np
-
+from src.double_integrator.configs.config import get_config
 from src.double_integrator.plotting import plot_kalman_gain_vs_noise_levels
 
-process_noise = np.logspace(-2, -1, 5, dtype='float32')
-observation_noise = np.logspace(-1, 0, 5, dtype='float32')
 
-plot_kalman_gain_vs_noise_levels(process_noise, observation_noise)
+config = get_config(
+    '/home/bodrue/PycharmProjects/neural_control/src/double_integrator/'
+    'configs/config_collect_training_data.py')
+
+process_noises = config.process.PROCESS_NOISES
+observation_noises = config.process.OBSERVATION_NOISES
+
+plot_kalman_gain_vs_noise_levels(process_noises, observation_noises)

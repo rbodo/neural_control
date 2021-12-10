@@ -4,8 +4,8 @@ import numpy as np
 
 from src.double_integrator.train_mlp import MLPModel
 from src.double_integrator.train_rnn import RNNModel
-from src.double_integrator.utils import get_lqr_cost, get_initial_states, \
-    get_additive_white_gaussian_noise
+from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
+                                         get_additive_white_gaussian_noise)
 
 
 class DI:
@@ -180,7 +180,7 @@ class DiMlpLqe(DiLqg):
 
 class DiRnn(DI):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, num_layers=1, path_model=None):
+                 path_model=None, rnn_kwargs: dict = None):
         super().__init__(var_x, var_y, dt, rng)
         # Here we use the noisy state measurements as input to the RNN.
 
@@ -192,7 +192,7 @@ class DiRnn(DI):
         # Control cost matrix:
         self.R = r * np.eye(self.n_y_control)
 
-        self.model = RNNModel(num_hidden, num_layers)
+        self.model = RNNModel(**rnn_kwargs)
         # self.rnn.hybridize()
         if path_model is None:
             self.model.initialize()
@@ -220,12 +220,12 @@ class DiRnn(DI):
 
 class DiRnnLqe(DiLqg):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, num_layers=1, path_model=None):
+                 path_model=None, rnn_kwargs: dict = None):
         super().__init__(var_x, var_y, dt, rng, q, r)
         # Here we use the estimated states as input to the RNN. The LQR
         # controller is replaced by the RNN.
 
-        self.model = RNNModel(num_hidden, num_layers)
+        self.model = RNNModel(**rnn_kwargs)
         # self.rnn.hybridize()
         if path_model is None:
             self.model.initialize()

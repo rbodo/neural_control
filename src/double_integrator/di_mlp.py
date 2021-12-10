@@ -5,6 +5,7 @@ import numpy as np
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiMlp
+from src.double_integrator.di_lqr import add_variables
 from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
 
@@ -13,8 +14,8 @@ def main(config):
 
     label = 'mlp'
     path_out = config.paths.PATH_OUT
-    process_noise = config.process.PROCESS_NOISE
-    observation_noise = config.process.OBSERVATION_NOISE
+    process_noise = config.process.PROCESS_NOISES[0]
+    observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
@@ -36,10 +37,7 @@ def main(config):
     times = np.linspace(0, T, num_steps, endpoint=False)
 
     monitor = Monitor()
-    monitor.add_variable('states', 'States', column_labels=['x', 'v'])
-    monitor.add_variable('outputs', 'Output', column_labels=['y'])
-    monitor.add_variable('control', 'Control', column_labels=['u'])
-    monitor.add_variable('cost', 'Cost', column_labels=['c'])
+    add_variables(monitor)
 
     # Simulate the system with MLP control.
     for i, x in enumerate(X0):

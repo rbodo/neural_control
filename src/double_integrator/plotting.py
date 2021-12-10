@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -35,6 +37,7 @@ def plot_timeseries(df, path=None):
         ax.set_title(title)
 
     if path is not None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         g.savefig(path, bbox_inches='tight')
     plt.show()
 
@@ -171,18 +174,18 @@ def plot_cost_heatmap(df, path=None, tail=None):
     plt.show()
 
 
-def plot_kalman_gain_vs_noise_levels(process_noise, observation_noise,
+def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
                                      path=None):
 
-    out = np.empty((len(process_noise), len(observation_noise)))
-    for i, w in enumerate(process_noise):
-        for j, v in enumerate(observation_noise):
+    out = np.empty((len(process_noises), len(observation_noises)))
+    for i, w in enumerate(process_noises):
+        for j, v in enumerate(observation_noises):
             system_closed = DiLqg(w, v)
             out[i, j] = np.linalg.norm(system_closed.L, ord=np.inf)
             # out[i, j] = np.max(system_closed.L)
     df = pd.DataFrame(out,
-                      [float2str(p) for p in process_noise],
-                      [float2str(p) for p in observation_noise])
+                      [float2str(p) for p in process_noises],
+                      [float2str(p) for p in observation_noises])
     g = sns.heatmap(df, annot=True, fmt='.2f', linewidths=.5, square=True,)
                     # norm=LogNorm())
     g.set_xlabel('Observation noise')

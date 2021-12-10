@@ -13,8 +13,8 @@ def main(config):
 
     label = 'open'
     path_out = config.paths.PATH_OUT
-    process_noise = config.process.PROCESS_NOISE
-    observation_noise = config.process.OBSERVATION_NOISE
+    process_noise = config.process.PROCESS_NOISES[0]
+    observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps

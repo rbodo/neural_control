@@ -5,27 +5,43 @@ import numpy as np
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiRnn
+from src.double_integrator.di_lqr import add_variables
 from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
+
+
+def run_single(system_open, system_closed, times, monitor, inits):
+    x = inits['x']
+    x_rnn = inits['x_rnn']
+    y = inits['y']
+
+    for t in times:
+        u, x_rnn = system_closed.get_control(x_rnn, y)
+        x = system_open.step(t, x, u)
+        y = system_open.output(t, x, u)
+        c = system_closed.get_cost(x, u)
+
+        monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
 
 
 def main(config):
 
     label = 'rnn'
     path_out = config.paths.PATH_OUT
-    process_noise = config.process.PROCESS_NOISE
-    observation_noise = config.process.OBSERVATION_NOISE
+    process_noise = config.process.PROCESS_NOISES[0]
+    observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
+    rnn_kwargs = {'num_layers': config.model.NUM_LAYERS,
+                  'num_hidden': config.model.NUM_HIDDEN,
+                  'activation': config.model.ACTIVATION}
 
     # Create double integrator with RNN feedback.
     system_closed = DiRnn(process_noise, observation_noise, dt, RNG,
                           config.controller.cost.lqr.Q,
                           config.controller.cost.lqr.R,
-                          config.model.NUM_HIDDEN,
-                          config.model.NUM_LAYERS,
-                          config.paths.PATH_MODEL)
+                          config.paths.PATH_MODEL, rnn_kwargs)
     system_open = system_closed.system
 
     # Sample some initial states.
@@ -37,10 +53,7 @@ def main(config):
     times = np.linspace(0, T, num_steps, endpoint=False)
 
     monitor = Monitor()
-    monitor.add_variable('states', 'States', column_labels=['x', 'v'])
-    monitor.add_variable('outputs', 'Output', column_labels=['y'])
-    monitor.add_variable('control', 'Control', column_labels=['u'])
-    monitor.add_variable('cost', 'Cost', column_labels=['c'])
+    add_variables(monitor)
 
     # Simulate the system with RNN control.
     for i, x in enumerate(X0):
@@ -50,13 +63,8 @@ def main(config):
         x_rnn = np.zeros((system_closed.model.num_layers,
                           system_closed.model.num_hidden))
         y = system_open.output(0, x, 0)
-        for t in times:
-            u, x_rnn = system_closed.get_control(x_rnn, y)
-            x = system_open.step(t, x, u)
-            y = system_open.output(t, x, u)
-            c = system_closed.get_cost(x, u)
-
-            monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
+        inits = {'x': x, 'x_rnn': x_rnn, 'y': y}
+        run_single(system_open, system_closed, times, monitor, inits)
 
         path = os.path.join(path_out, 'timeseries_{}_{}'.format(label, i))
         plot_timeseries(monitor.get_last_experiment(), path=path)

@@ -20,10 +20,11 @@ config.training.NUM_EPOCHS = 100
 config.simulation = CfgNode()
 config.simulation.T = 10  # Simulation duration
 config.simulation.NUM_STEPS = 100  # Number of steps in simulation duration
+config.simulation.GRID_SIZE = 1  # Number of grid lines along each dimension
 
 config.process = CfgNode()
-config.process.PROCESS_NOISE = 0.
-config.process.OBSERVATION_NOISE = 0.
+config.process.PROCESS_NOISES = [0.]
+config.process.OBSERVATION_NOISES = [0.]
 config.process.STATE_MEAN = []  # For sampling initial state values
 config.process.STATE_COVARIANCE = 1e-3  # For sampling initial state values
 
@@ -67,10 +68,11 @@ def get_config(
         _config.merge_from_list(opts)
 
     _config.freeze()
-    with open(_config.paths.PATH_OUT + '_config.txt', 'w') as f:
-        f.write(_config.dump())
 
     for p in _config.paths.values():
         os.makedirs(os.path.dirname(p), exist_ok=True)
+
+    with open(_config.paths.PATH_OUT + '_config.txt', 'w') as f:
+        f.write(_config.dump())
 
     return _config

@@ -9,12 +9,38 @@ from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
 
 
+def add_variables(monitor: Monitor):
+    dtype = 'float32'
+    kwargs = [
+        dict(name='states', label='States', column_labels=['x', 'v'],
+             dtype=dtype),
+        dict(name='outputs', label='Output', column_labels=['y'], dtype=dtype),
+        dict(name='control', label='Control', column_labels=['u'],
+             dtype=dtype),
+        dict(name='cost', label='Cost', column_labels=['c'], dtype=dtype)
+    ]
+    for k in kwargs:
+        monitor.add_variable(**k)
+
+
+def run_single(system_open, system_closed, times, monitor, inits):
+    x = inits['x']
+
+    for t in times:
+        u = system_closed.get_control(x)
+        x = system_open.step(t, x, u)
+        y = system_open.output(t, x, u)
+        c = system_closed.get_cost(x, u)
+
+        monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
+
+
 def main(config):
 
     label = 'lqr'
     path_out = config.paths.PATH_OUT
-    process_noise = config.process.PROCESS_NOISE
-    observation_noise = config.process.OBSERVATION_NOISE
+    process_noise = config.process.PROCESS_NOISES[0]
+    observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
@@ -33,22 +59,14 @@ def main(config):
     times = np.linspace(0, T, num_steps, endpoint=False)
 
     monitor = Monitor()
-    monitor.add_variable('states', 'States', column_labels=['x', 'v'])
-    monitor.add_variable('outputs', 'Output', column_labels=['y'])
-    monitor.add_variable('control', 'Control', column_labels=['u'])
-    monitor.add_variable('cost', 'Cost', column_labels=['c'])
+    add_variables(monitor)
 
     # Simulate the system with LQR control.
     for i, x in enumerate(X0):
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
-        for t in times:
-            u = system_closed.get_control(x)
-            x = system_open.step(t, x, u)
-            y = system_open.output(t, x, u)
-            c = system_closed.get_cost(x, u)
-
-            monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
+        inits = {'x': x}
+        run_single(system_open, system_closed, times, monitor, inits)
 
         path = os.path.join(path_out, 'timeseries_{}_{}'.format(label, i))
         plot_timeseries(monitor.get_last_experiment(), path=path)
