@@ -120,16 +120,18 @@ def plot_trajectories_vs_noise(df, path=None):
 
 def plot_cost_vs_noise(df, path=None):
     col_wrap = int(np.sqrt(df['process_noise'].nunique()))
+    controller = 'controller' if 'controller' in df.keys() else None
     g = sns.relplot(data=df, x='times', y='c', col='process_noise',
-                    hue='observation_noise', col_wrap=col_wrap, kind='line',
-                    palette=sns.color_palette('coolwarm', as_cmap=True),
-                    hue_norm=LogNorm())
+                    style=controller, hue='observation_noise',
+                    col_wrap=col_wrap, kind='line', hue_norm=LogNorm(),
+                    palette=sns.color_palette('coolwarm', as_cmap=True))
     g.set(yscale='log')
     g.set_titles("Process noise: {col_name:.2}")
-    g.legend.set_title('Observation noise')
     g.set_axis_labels('Time', 'Cost')
-    for t in g.legend.texts:
-        t.set_text(float2str(float(t.get_text())))
+    if controller is None:
+        g.legend.set_title('Observation noise')
+
+    format_legend(g.legend)
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -193,3 +195,46 @@ def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
     plt.show()
+
+
+def create_plots(monitor, config, system_closed=None, label=None, suffix=0,
+                 rng=None):
+    path_figures = config.paths.PATH_FIGURES
+    odefunc = None if system_closed is None else system_closed.step
+
+    path = os.path.join(path_figures, f'timeseries_{label}_{suffix}')
+    plot_timeseries(monitor.get_last_experiment(), path=path)
+
+    path = os.path.join(path_figures, f'phase_diagram_{label}_{suffix}')
+    plot_phase_diagram(monitor.get_last_trajectory(), odefunc=odefunc, rng=rng,
+                       xt=config.controller.STATE_TARGET, path=path)
+
+
+def plot_cost_scatter(df, path=None):
+    col_wrap = int(np.sqrt(df['process_noise'].nunique()))
+    g = sns.relplot(data=df, x='c_lqg', y='c_rnn', hue='observation_noise',
+                    style='observation_noise', col='process_noise',
+                    col_wrap=col_wrap, kind='scatter', hue_norm=LogNorm(),
+                    palette=sns.color_palette('coolwarm', as_cmap=True))
+
+    g.set(xscale='log', yscale='log')
+    g.set_titles("Process noise: {col_name:.2}")
+    g.set_axis_labels('Cost LQG', 'Cost RNN')
+    g.legend.set_title('Observation noise')
+
+    format_legend(g.legend)
+
+    for ax in g.axes:
+        ax.plot(ax.get_xlim(), ax.get_xlim())
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
+def format_legend(legend):
+    for t in legend.texts:
+        try:
+            t.set_text(float2str(float(t.get_text())))
+        except ValueError:
+            pass

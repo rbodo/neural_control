@@ -1,4 +1,3 @@
-import os
 import sys
 
 import numpy as np
@@ -7,7 +6,7 @@ from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiRnn
 from src.double_integrator.di_lqr import add_variables
 from src.double_integrator.utils import RNG, Monitor
-from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
+from src.double_integrator.plotting import create_plots
 
 
 def run_single(system_open, system_closed, times, monitor, inits):
@@ -27,7 +26,6 @@ def run_single(system_open, system_closed, times, monitor, inits):
 def main(config):
 
     label = 'rnn'
-    path_out = config.paths.PATH_OUT
     process_noise = config.process.PROCESS_NOISES[0]
     observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
@@ -41,7 +39,7 @@ def main(config):
     system_closed = DiRnn(process_noise, observation_noise, dt, RNG,
                           config.controller.cost.lqr.Q,
                           config.controller.cost.lqr.R,
-                          config.paths.PATH_MODEL, rnn_kwargs)
+                          config.paths.FILEPATH_MODEL, rnn_kwargs)
     system_open = system_closed.system
 
     # Sample some initial states.
@@ -66,12 +64,7 @@ def main(config):
         inits = {'x': x, 'x_rnn': x_rnn, 'y': y}
         run_single(system_open, system_closed, times, monitor, inits)
 
-        path = os.path.join(path_out, 'timeseries_{}_{}'.format(label, i))
-        plot_timeseries(monitor.get_last_experiment(), path=path)
-
-        path = os.path.join(path_out, 'phase_diagram_{}_{}'.format(label, i))
-        plot_phase_diagram(monitor.get_last_trajectory(), rng=RNG,
-                           xt=config.controller.STATE_TARGET, path=path)
+        create_plots(monitor, config, system_closed, label, i, RNG)
 
 
 if __name__ == '__main__':

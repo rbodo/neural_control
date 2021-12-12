@@ -119,13 +119,13 @@ def train_single(config, verbose=True, plot_control=True, save_model=True):
     num_layers = config.model.NUM_LAYERS
     num_outputs = 1
     activation = config.model.ACTIVATION
-    path_dataset = config.paths.PATH_TRAINING_DATA
+    path_data = config.paths.FILEPATH_INPUT_DATA
     batch_size = config.training.BATCH_SIZE
     lr = config.training.LEARNING_RATE
     num_epochs = config.training.NUM_EPOCHS
     optimizer = config.training.OPTIMIZER
 
-    data = pd.read_pickle(path_dataset)
+    data = pd.read_pickle(path_data)
 
     test_data_loader, train_data_loader = get_data_loaders(data, config,
                                                            'observations')
@@ -181,19 +181,19 @@ def train_single(config, verbose=True, plot_control=True, save_model=True):
                             valid_loss / len(test_data_loader)))
 
     if save_model:
-        model.save_parameters(config.paths.PATH_MODEL)
-        print("Saved model to {}.".format(config.paths.PATH_MODEL))
+        model.save_parameters(config.paths.FILEPATH_MODEL)
+        print("Saved model to {}.".format(config.paths.FILEPATH_MODEL))
 
 
 def train_sweep(config):
-    path, filename = os.path.split(config.paths.PATH_MODEL)
+    path, filename = os.path.split(config.paths.FILEPATH_MODEL)
     process_noises = config.process.PROCESS_NOISES
     observation_noises = config.process.OBSERVATION_NOISES
 
     config.defrost()
     for w, v in tqdm(product(process_noises, observation_noises)):
         path_model = os.path.join(path, get_model_name(filename, w, v))
-        config.paths.PATH_MODEL = path_model
+        config.paths.FILEPATH_MODEL = path_model
         config.process.PROCESS_NOISES = [w]
         config.process.OBSERVATION_NOISES = [v]
 
@@ -202,7 +202,7 @@ def train_sweep(config):
 
 if __name__ == '__main__':
     path_config = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                  'double_integrator/configs/config_rnn.py'
+                  'double_integrator/configs/config_train_rnn.py'
     _config = get_config(path_config)
 
     train_sweep(_config)

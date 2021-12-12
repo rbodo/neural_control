@@ -1,4 +1,3 @@
-import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -8,10 +7,10 @@ from tqdm.contrib import tzip
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiLqg
+from src.double_integrator.plotting import create_plots
+from src.double_integrator.di_lqr import add_variables as add_variables_lqr
 from src.double_integrator.utils import (RNG, Monitor,
                                          get_additive_white_gaussian_noise)
-from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
-from src.double_integrator.di_lqr import add_variables as add_variables_lqr
 
 if TYPE_CHECKING:
     from yacs.config import CfgNode
@@ -57,8 +56,7 @@ def jitter(x, Sigma, rng):
 def main(config: 'CfgNode', show_plots: bool = False):
     label = 'lqg'
 
-    path_out = config.paths.PATH_OUT
-    path_training_data = config.paths.PATH_TRAINING_DATA
+    filepath_output_data = config.paths.FILEPATH_OUTPUT_DATA
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     grid_size = config.simulation.GRID_SIZE
@@ -69,7 +67,6 @@ def main(config: 'CfgNode', show_plots: bool = False):
     Sigma0 = config.process.STATE_COVARIANCE * np.eye(len(mu0))
     q = config.controller.cost.lqr.Q
     r = config.controller.cost.lqr.R
-    state_target = config.controller.STATE_TARGET
 
     # Sample some initial states.
     grid = get_grid(grid_size)
@@ -102,19 +99,12 @@ def main(config: 'CfgNode', show_plots: bool = False):
                 run_single(system_open, system_closed, times, monitor, inits)
 
                 if show_plots:
-                    path = os.path.join(path_out, f'timeseries_{label}_{i}')
-                    plot_timeseries(monitor.get_last_experiment(), path=path)
-
-                    path = os.path.join(path_out, f'phase_diagram_{label}_{i}')
-                    plot_phase_diagram(monitor.get_last_trajectory(),
-                                       odefunc=system_closed.step, rng=RNG,
-                                       xt=state_target, path=path)
+                    create_plots(monitor, config, system_closed, label, i, RNG)
 
     # Store state trajectories and corresponding control signals.
-    if os.path.isfile(path_training_data):
-        print(f"Saved data to {path_training_data}.")
-        df = monitor.get_dataframe()
-        df.to_pickle(path_training_data)
+    df = monitor.get_dataframe()
+    df.to_pickle(filepath_output_data)
+    print(f"Saved data to {filepath_output_data}.")
 
 
 if __name__ == '__main__':

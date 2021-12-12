@@ -242,7 +242,6 @@ class DiRnnLqe(DiLqg):
         return y.asnumpy().ravel(), x[0].asnumpy().ravel()
 
     def step(self, t, x, u):
-        # Todo: The RNN hidden states need to be initialized better.
         x_rnn = np.zeros((self.model.num_layers, self.model.num_hidden))
         y = self.system.output(t, x, u)
         return self.system.dynamics(t, x, self.get_control(x_rnn, y)[0] + u)

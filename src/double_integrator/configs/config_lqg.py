@@ -1,7 +1,10 @@
+import os
+
 from src.double_integrator.configs.config import config as cfg
 
-cfg.paths.PATH_OUT = \
-    '/home/bodrue/Data/neural_control/double_integrator/lqg/figures/'
+base_path = '/home/bodrue/Data/neural_control/double_integrator/lqg'
+cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
+cfg.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'lqg.pkl')
 
 cfg.simulation.T = 10
 cfg.simulation.NUM_STEPS = 1000

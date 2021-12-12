@@ -1,4 +1,3 @@
-import os
 import sys
 
 import numpy as np
@@ -6,13 +5,12 @@ import numpy as np
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DI
 from src.double_integrator.utils import RNG, Monitor
-from src.double_integrator.plotting import plot_timeseries, plot_phase_diagram
+from src.double_integrator.plotting import create_plots
 
 
 def main(config):
 
     label = 'open'
-    path_out = config.paths.PATH_OUT
     process_noise = config.process.PROCESS_NOISES[0]
     observation_noise = config.process.OBSERVATION_NOISES[0]
     T = config.simulation.T
@@ -44,13 +42,7 @@ def main(config):
             y = system_open.output(t, x, u)
             monitor.update_variables(t, states=x, outputs=y)
 
-        path = os.path.join(path_out, 'timeseries_{}_{}'.format(label, i))
-        plot_timeseries(monitor.get_last_experiment(), path=path)
-
-        path = os.path.join(path_out, 'phase_diagram_{}_{}'.format(label, i))
-        plot_phase_diagram(monitor.get_last_trajectory(),
-                           odefunc=system_closed.step, rng=RNG,
-                           xt=config.controller.STATE_TARGET, path=path)
+        create_plots(monitor, config, system_closed, label, i, RNG)
 
 
 if __name__ == '__main__':

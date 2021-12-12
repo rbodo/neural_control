@@ -40,12 +40,12 @@ def main():
     num_hidden = config.model.NUM_HIDDEN
     num_outputs = 1
 
-    path_dataset = config.paths.PATH_TRAINING_DATA
+    path_data = config.paths.FILEPATH_INPUT_DATA
     batch_size = config.training.BATCH_SIZE
     lr = config.training.LEARNING_RATE
     num_epochs = config.training.NUM_EPOCHS
 
-    data = np.load(os.path.join(path_dataset, 'lqg.npz'))
+    data = np.load(path_data)
     # x = data['X']  # 'X' are the noise free process states.
     x = data['Y']  # 'Y' is the process output (used as input here).
     y = data['U']  # 'U' is the control signal (used as labels here).
@@ -111,8 +111,8 @@ def main():
             train_loss / len(train_data_loader),
             valid_loss / len(test_data_loader)))
 
-    model.save_parameters(config.paths.PATH_MODEL)
-    print("Saved model to {}.".format(config.paths.PATH_MODEL))
+    model.save_parameters(config.paths.FILEPATH_MODEL)
+    print("Saved model to {}.".format(config.paths.FILEPATH_MODEL))
 
 
 if __name__ == '__main__':

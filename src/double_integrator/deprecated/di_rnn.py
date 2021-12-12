@@ -128,15 +128,15 @@ def main(config):
             c = get_lqr_cost_vectorized(x[:di_rnn.n_x_process], y, Q, R)
             print("Total cost: {}.".format(np.sum(c)))
 
-        path_out = config.paths.PATH_OUT
+        path_figures = config.paths.PATH_FIGURES
         _x = x if show_rnn_states else x[:-di_rnn.n_x_control]
         plot_timeseries(t, None, y, _x, c, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_rnn'))
+                        os.path.join(path_figures, 'timeseries_rnn'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
                            di_rnn.n_x_control, W=di_rnn.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_rnn'))
+                           path=os.path.join(path_figures, 'phase_diagram_rnn'))
 
 
 if __name__ == '__main__':

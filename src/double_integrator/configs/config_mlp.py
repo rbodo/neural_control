@@ -1,12 +1,14 @@
+import os
+
 from yacs.config import CfgNode
 
 from src.double_integrator.configs.config import config as cfg
 from src.double_integrator.configs.config_collect_training_data import cfg as c
 
-base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp/'
-cfg.paths.PATH_OUT = base_path + 'figures/'
-cfg.paths.PATH_TRAINING_DATA = c.paths.PATH_TRAINING_DATA
-cfg.paths.PATH_MODEL = base_path + 'models/mlp.params'
+base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp'
+cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
+cfg.paths.FILEPATH_INPUT_DATA = c.paths.FILEPATH_OUTPUT_DATA
+cfg.paths.PATH_MODEL = os.path.join(base_path, 'models/mlp.params')
 
 cfg.model = CfgNode()
 cfg.model.NUM_HIDDEN = 10

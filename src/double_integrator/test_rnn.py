@@ -10,15 +10,17 @@ from src.double_integrator.control_systems import DiRnn
 from src.double_integrator.di_lqr import add_variables
 from src.double_integrator.di_rnn import run_single
 from src.double_integrator.train_rnn import get_model_name, get_trajectories
-from src.double_integrator.utils import RNG, Monitor, select_noise_subset, \
-    split_train_test
+from src.double_integrator.utils import (RNG, Monitor, select_noise_subset,
+                                         split_train_test)
 
 
 def main(config):
 
-    path_out = config.paths.PATH_OUT
-    path_data = config.paths.PATH_TRAINING_DATA
-    path, filename = os.path.split(config.paths.PATH_MODEL)
+    path_data = config.paths.FILEPATH_INPUT_DATA
+    path_out = config.paths.FILEPATH_OUTPUT_DATA
+    use_single_model = config.model.USE_SINGLE_MODEL_IN_SWEEP
+    path_model = config.paths.FILEPATH_MODEL
+    path, model_name = os.path.split(path_model)
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
@@ -44,7 +46,9 @@ def main(config):
         for v in tqdm(observation_noises, 'Observation noise'):
             monitor.update_parameters(observation_noise=v)
 
-            path_model = os.path.join(path, get_model_name(filename, w, v))
+            if not use_single_model:
+                path_model = os.path.join(path,
+                                          get_model_name(model_name, w, v))
             system_closed = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs)
             system_open = system_closed.system
 
@@ -63,14 +67,16 @@ def main(config):
 
     # Store state trajectories and corresponding control signals.
     df = monitor.get_dataframe()
-    df.to_pickle(path_out + 'rnn.pkl')
+    df.to_pickle(path_out)
 
 
 if __name__ == '__main__':
 
-    _config = get_config(
-        '/home/bodrue/PycharmProjects/neural_control/src/double_integrator/'
-        'configs/config_rnn.py')
+    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
+                'double_integrator/configs'
+    # filename = 'config_test_rnn.py'
+    filename = 'config_test_rnn_generalization.py'
+    _config = get_config(os.path.join(base_path, filename))
 
     main(_config)
 

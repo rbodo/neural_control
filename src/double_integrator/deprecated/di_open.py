@@ -73,14 +73,14 @@ def main(config):
         t, y, x = control.input_output_response(system_open, times, 0, x0,
                                                 return_x=True)
 
-        path_out = config.paths.PATH_OUT
+        path_figures = config.paths.PATH_FIGURES
         plot_timeseries(t, None, y, x, dimension_map=DIMENSION_MAP,
-                        path=os.path.join(path_out, 'timeseries'))
+                        path=os.path.join(path_figures, 'timeseries'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
                            odefunc=system_open.dynamics,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram'))
+                           path=os.path.join(path_figures, 'phase_diagram'))
 
 
 if __name__ == '__main__':

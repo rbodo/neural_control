@@ -1,6 +1,6 @@
 from src.double_integrator.configs.config import config as cfg
 
-cfg.paths.PATH_OUT = \
+cfg.paths.PATH_FIGURES = \
     '/home/bodrue/Data/neural_control/double_integrator/open/figures/'
 
 cfg.simulation.T = 10

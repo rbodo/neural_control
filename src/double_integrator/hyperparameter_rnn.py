@@ -76,11 +76,11 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
     config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
                         'double_integrator/configs/config_rnn.py')
 
-    path_dataset = config.paths.PATH_TRAINING_DATA
+    path_data = config.paths.FILEPATH_INPUT_DATA
     batch_size = config.training.BATCH_SIZE
     num_epochs = config.training.NUM_EPOCHS
 
-    data = np.load(os.path.join(path_dataset, 'lqg.npz'))
+    data = np.load(path_data)
     # x = data['X']  # 'X' are the noise free process states.
     x = data['Y']  # 'Y' is the process output (used as input here).
     y = data['U']  # 'U' is the control signal (used as labels here).

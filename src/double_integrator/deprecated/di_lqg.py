@@ -125,14 +125,14 @@ def main(config):
         c = di_lqg.get_cost(x[:di_lqg.n_x_process], y)
         print("Total cost: {}.".format(np.sum(c)))
 
-        path_out = config.paths.PATH_OUT
+        path_figures = config.paths.PATH_FIGURES
         plot_timeseries(t, None, y, x, c, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_lqg'))
+                        os.path.join(path_figures, 'timeseries_lqg'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}),
                            odefunc=system_closed.dynamics, W=di_lqg.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_lqg'))
+                           path=os.path.join(path_figures, 'phase_diagram_lqg'))
 
 
 if __name__ == '__main__':

@@ -89,13 +89,13 @@ def main(config):
         t, y, x = control.input_output_response(system_closed, times, X0=x0,
                                                 return_x=True)
 
-        path_out = config.paths.PATH_OUT
+        path_figures = config.paths.PATH_FIGURES
         plot_timeseries(t, None, y, x, None, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_mlp'))
+                        os.path.join(path_figures, 'timeseries_mlp'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}), W=di_mlp.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out, 'phase_diagram_mlp'))
+                           path=os.path.join(path_figures, 'phase_diagram_mlp'))
 
 
 if __name__ == '__main__':

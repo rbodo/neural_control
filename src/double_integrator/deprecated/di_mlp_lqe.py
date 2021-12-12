@@ -103,13 +103,13 @@ def main(config):
         c = di_mlp.get_cost(x[:di_mlp.n_x_process], y)
         print("Total cost: {}.".format(np.sum(c)))
 
-        path_out = config.paths.PATH_OUT
+        path_figures = config.paths.PATH_FIGURES
         plot_timeseries(t, None, y, x, c, DIMENSION_MAP,
-                        os.path.join(path_out, 'timeseries_mlp_lqe'))
+                        os.path.join(path_figures, 'timeseries_mlp_lqe'))
 
         plot_phase_diagram(OrderedDict({'x': x[0], 'v': x[1]}), W=di_mlp.W,
                            xt=config.controller.STATE_TARGET,
-                           path=os.path.join(path_out,
+                           path=os.path.join(path_figures,
                                              'phase_diagram_mlp_lqe'))
 
 

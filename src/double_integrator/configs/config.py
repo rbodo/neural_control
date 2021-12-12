@@ -8,9 +8,10 @@ config = CfgNode()
 
 config.SEED = 42
 config.paths = CfgNode()
-config.paths.PATH_OUT = './'  # Where to save plots
-config.paths.PATH_TRAINING_DATA = './'  # Where to save or load training data
-config.paths.PATH_MODEL = './'
+config.paths.PATH_FIGURES = './'  # Where to save plots
+config.paths.FILEPATH_INPUT_DATA = ''  # Location of input data
+config.paths.FILEPATH_OUTPUT_DATA = ''  # Where to save output data
+config.paths.FILEPATH_MODEL = ''
 
 config.training = CfgNode()
 config.training.BATCH_SIZE = 32
@@ -34,6 +35,9 @@ config.controller.cost.lqr = CfgNode()
 config.controller.cost.lqr.Q = 0.5  # Scale factor for state cost
 config.controller.cost.lqr.R = 0.5  # Scale factor for control cost
 config.controller.STATE_TARGET = []
+
+config.model = CfgNode()
+config.model.USE_SINGLE_MODEL_IN_SWEEP = False  # Concerns RNN noise sweep.
 
 config.set_new_allowed(True)
 
@@ -69,10 +73,15 @@ def get_config(
 
     _config.freeze()
 
-    for p in _config.paths.values():
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+    for k, p in _config.paths.items():
+        if 'FILE' in k:
+            p = os.path.dirname(p)
+        if p:
+            os.makedirs(p, exist_ok=True)
 
-    with open(_config.paths.PATH_OUT + '_config.txt', 'w') as f:
-        f.write(_config.dump())
+    if _config.paths.FILEPATH_OUTPUT_DATA:
+        with open(os.path.join(os.path.dirname(
+                _config.paths.FILEPATH_OUTPUT_DATA), '.config.txt'), 'w') as f:
+            f.write(_config.dump())
 
     return _config
