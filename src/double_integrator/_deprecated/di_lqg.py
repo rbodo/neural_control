@@ -6,8 +6,8 @@ import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.deprecated.di_lqr import DiLqr
-from src.double_integrator.deprecated.utils import (
+from src.double_integrator._deprecated.di_lqr import DiLqr
+from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, lqe_dynamics, lqe_filter_output,
     lqr_controller_output)

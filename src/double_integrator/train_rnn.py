@@ -11,30 +11,9 @@ from mxnet import autograd
 from tqdm import tqdm
 
 from src.double_integrator.configs.config import get_config
+from src.double_integrator.control_systems import RNNModel
+from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.utils import split_train_test, select_noise_subset
-
-
-class RNNModel(mx.gluon.HybridBlock):
-
-    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1,
-                 activation='relu', **kwargs):
-
-        super().__init__(**kwargs)
-
-        self.num_hidden = num_hidden
-        self.num_layers = num_layers
-
-        with self.name_scope():
-            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation)
-            self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
-                                             in_units=num_hidden,
-                                             flatten=False)
-
-    # noinspection PyUnusedLocal
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        output, hidden = self.rnn(x, args[0])
-        decoded = self.decoder(output)
-        return decoded, hidden
 
 
 def get_model_name(filename, w, v):
@@ -100,7 +79,7 @@ def get_data_loaders(data, config, variable):
 
 
 def evaluate(model, test_data_loader, loss_function, hidden_init, context):
-    valid_loss = 0
+    validation_loss = 0
     for data, label in test_data_loader:
         data = mx.nd.moveaxis(data, -1, 0)
         data = data.as_in_context(context)
@@ -108,11 +87,12 @@ def evaluate(model, test_data_loader, loss_function, hidden_init, context):
         output, hidden = model(data, hidden_init)
         output = mx.nd.moveaxis(output, 0, -1)
         loss = loss_function(output, label)
-        valid_loss += loss.mean().asscalar()
-    return valid_loss
+        validation_loss += loss.mean().asscalar()
+    return validation_loss
 
 
-def train_single(config, verbose=True, plot_control=True, save_model=True):
+def train_single(config, verbose=True, plot_control=True, plot_loss=True,
+                 save_model=True):
     context = mx.gpu(1) if mx.context.num_gpus() > 0 else mx.cpu()
 
     num_hidden = config.model.NUM_HIDDEN
@@ -142,8 +122,10 @@ def train_single(config, verbose=True, plot_control=True, save_model=True):
 
     hidden_init = mx.nd.zeros((num_layers, batch_size, model.num_hidden),
                               ctx=context)
+    training_losses = []
+    validation_losses = []
     for epoch in range(num_epochs):
-        train_loss = 0
+        training_loss = 0
         label = None
         output = None
         tic = time.time()
@@ -162,7 +144,10 @@ def train_single(config, verbose=True, plot_control=True, save_model=True):
 
             trainer.step(batch_size)
 
-            train_loss += loss.mean().asscalar()
+            training_loss += loss.mean().asscalar()
+
+        training_loss_mean = training_loss / len(train_data_loader)
+        training_losses.append(training_loss_mean)
 
         if plot_control:
             plt.plot(output[0, 0].asnumpy(), label='RNN')
@@ -172,13 +157,22 @@ def train_single(config, verbose=True, plot_control=True, save_model=True):
             plt.ylabel('Control')
             plt.show()
 
-        if verbose:
-            valid_loss = evaluate(model, test_data_loader, loss_function,
-                                  hidden_init, context)
-            print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
-                  "".format(epoch, time.time() - tic,
-                            train_loss / len(train_data_loader),
-                            valid_loss / len(test_data_loader)))
+        if verbose or plot_loss:
+            validation_loss = evaluate(model, test_data_loader, loss_function,
+                                       hidden_init, context)
+            validation_loss_mean = validation_loss / len(test_data_loader)
+            validation_losses.append(validation_loss_mean)
+            if verbose:
+                print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
+                      "".format(epoch, time.time() - tic,
+                                training_loss_mean, validation_loss_mean))
+
+    if plot_loss:
+        path_figures = config.paths.PATH_FIGURES
+        w = float2str(config.process.PROCESS_NOISES[0])
+        v = float2str(config.process.OBSERVATION_NOISES[0])
+        path_plot = os.path.join(path_figures, f'training_curve_{w}_{v}.png')
+        plot_training_curve(training_losses, validation_losses, path_plot)
 
     if save_model:
         model.save_parameters(config.paths.FILEPATH_MODEL)

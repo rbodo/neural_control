@@ -9,23 +9,7 @@ from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from src.double_integrator.configs.config import get_config
-
-
-class MLPModel(mx.gluon.HybridBlock):
-
-    def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
-
-        super().__init__(**kwargs)
-
-        self.num_hidden = num_hidden
-
-        with self.name_scope():
-            self.hidden = mx.gluon.nn.Dense(num_hidden, activation='relu')
-            self.output = mx.gluon.nn.Dense(num_outputs, activation='tanh')
-
-    # noinspection PyUnusedLocal
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        return self.output(self.hidden(x))
+from src.double_integrator.control_systems import MLPModel
 
 
 def main():

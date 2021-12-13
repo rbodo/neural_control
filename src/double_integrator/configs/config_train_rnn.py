@@ -1,11 +1,17 @@
 import os
+import time
 
 from yacs.config import CfgNode
 
 from src.double_integrator.configs.config import config as cfg
 from src.double_integrator.configs.config_collect_training_data import cfg as c
 
-base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn/'
+RANDOMIZE_WORKDIR = True
+
+base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn'
+if RANDOMIZE_WORKDIR:
+    base_path += time.strftime('_%Y%m%d_%H%M%S')
+cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures_training')
 cfg.paths.FILEPATH_INPUT_DATA = c.paths.FILEPATH_OUTPUT_DATA
 cfg.paths.FILEPATH_MODEL = os.path.join(base_path, 'models/rnn.params')
 

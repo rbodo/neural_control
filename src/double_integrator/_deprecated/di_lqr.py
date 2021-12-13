@@ -6,8 +6,8 @@ import control
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.deprecated.di_open import DI
-from src.double_integrator.deprecated.utils import (
+from src.double_integrator._deprecated.di_open import DI
+from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, DIMENSION_MAP, plot_timeseries,
     lqr_controller_output)
 from src.double_integrator.utils import get_lqr_cost_vectorized

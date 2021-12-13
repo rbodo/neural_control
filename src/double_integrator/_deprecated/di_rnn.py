@@ -7,9 +7,9 @@ import numpy as np
 import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.deprecated.di_open import DI
-from src.double_integrator.train_rnn import RNNModel
-from src.double_integrator.deprecated.utils import (
+from src.double_integrator._deprecated.di_open import DI
+from src.double_integrator.control_systems import RNNModel
+from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, rnn_controller_output,
     rnn_controller_dynamics)

@@ -110,8 +110,7 @@ def plot_trajectories_vs_noise(df, path=None):
                     hue_norm=LogNorm(), alpha=0.5)
     g.set_titles("Process noise: {col_name:.2}")
     g.legend.set_title('Observation noise')
-    for t in g.legend.texts:
-        t.set_text(float2str(float(t.get_text())))
+    format_legend(g.legend)
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -238,3 +237,26 @@ def format_legend(legend):
             t.set_text(float2str(float(t.get_text())))
         except ValueError:
             pass
+
+
+def plot_training_curve(train_loss, valid_loss, path=None,
+                        use_current_figure=False):
+    if use_current_figure:
+        ax = plt.gca()
+        fig = plt.gcf()
+    else:
+        fig, ax = plt.subplots()
+
+    ax.plot(train_loss, '-b', label="training")
+    ax.plot(valid_loss, '--b', label="validation")
+
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+
+    if not use_current_figure:
+        # Only show legend when drawing single set of training curves in figure
+        ax.legend()
+
+    if path is not None:
+        fig.savefig(path, bbox_inches='tight')
+    plt.show()

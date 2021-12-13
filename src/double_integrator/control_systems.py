@@ -2,8 +2,6 @@ import control
 import mxnet as mx
 import numpy as np
 
-from src.double_integrator.train_mlp import MLPModel
-from src.double_integrator.train_rnn import RNNModel
 from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
                                          get_additive_white_gaussian_noise)
 
@@ -279,3 +277,43 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         if self.V is not None and not deterministic:
             out += get_additive_white_gaussian_noise(self.V, rng=self.rng)
         return out
+
+
+class RNNModel(mx.gluon.HybridBlock):
+
+    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1,
+                 activation='relu', **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+
+        with self.name_scope():
+            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation)
+            self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
+                                             in_units=num_hidden,
+                                             flatten=False)
+
+    # noinspection PyUnusedLocal
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        output, hidden = self.rnn(x, args[0])
+        decoded = self.decoder(output)
+        return decoded, hidden
+
+
+class MLPModel(mx.gluon.HybridBlock):
+
+    def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.num_hidden = num_hidden
+
+        with self.name_scope():
+            self.hidden = mx.gluon.nn.Dense(num_hidden, activation='relu')
+            self.output = mx.gluon.nn.Dense(num_outputs, activation='tanh')
+
+    # noinspection PyUnusedLocal
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        return self.output(self.hidden(x))
