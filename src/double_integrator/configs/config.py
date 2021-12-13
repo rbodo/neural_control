@@ -16,7 +16,7 @@ config.paths.FILEPATH_MODEL = ''
 config.training = CfgNode()
 config.training.BATCH_SIZE = 32
 config.training.LEARNING_RATE = 1e-3
-config.training.NUM_EPOCHS = 100
+config.training.NUM_EPOCHS = 10
 
 config.simulation = CfgNode()
 config.simulation.T = 10  # Simulation duration

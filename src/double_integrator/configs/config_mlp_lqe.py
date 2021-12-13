@@ -3,11 +3,12 @@ import os
 from yacs.config import CfgNode
 
 from src.double_integrator.configs.config import config as cfg
-from src.double_integrator.configs.config_collect_training_data import cfg as c
+from src.double_integrator.configs.config_collect_training_data import \
+    FILEPATH_OUTPUT_DATA
 
 base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp_lqe'
 cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
-cfg.paths.FILEPATH_INPUT_DATA = c.paths.FILEPATH_OUTPUT_DATA
+cfg.paths.FILEPATH_INPUT_DATA = FILEPATH_OUTPUT_DATA
 cfg.paths.PATH_MODEL = os.path.join(base_path, 'models/mlp_lqe.params')
 
 cfg.model = CfgNode()
