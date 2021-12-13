@@ -23,8 +23,7 @@ def main(config):
 
     # Sample some initial states.
     X0 = system_closed.get_initial_states(config.process.STATE_MEAN,
-                                          config.process.STATE_COVARIANCE, 1,
-                                          RNG)
+                                          config.process.STATE_COVARIANCE)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 

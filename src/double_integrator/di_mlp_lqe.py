@@ -29,8 +29,7 @@ def main(config):
     system_open = system_closed.system
 
     # Sample some initial states.
-    n = 1
-    X0 = system_closed.get_initial_states(mu0, Sigma0, n, RNG)
+    X0 = system_closed.get_initial_states(mu0, Sigma0)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 

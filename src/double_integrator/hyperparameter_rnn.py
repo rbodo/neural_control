@@ -1,16 +1,15 @@
-import os
 import sys
 import time
 import logging
 
 import optuna
-import numpy as np
+import pandas as pd
 import mxnet as mx
 from mxnet import autograd
 from matplotlib import pyplot as plt
-from sklearn.model_selection import train_test_split
 
 from src.double_integrator.configs.config import get_config
+from src.double_integrator.train_rnn import get_data_loaders
 
 
 def create_model(trial):
@@ -68,34 +67,22 @@ class RNNModel(mx.gluon.HybridBlock):
 
 
 def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
-    num_cpus = min(os.cpu_count() // 2, 1)
     num_gpus = mx.context.num_gpus()
     context = mx.gpu(1) if num_gpus > 0 else mx.cpu()
     print(context)
 
-    config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                        'double_integrator/configs/config_rnn.py')
+    config = get_config(
+        '/home/bodrue/PycharmProjects/neural_control/src/double_integrator/'
+        'configs/config_hyperparameter_rnn.py')
 
     path_data = config.paths.FILEPATH_INPUT_DATA
     batch_size = config.training.BATCH_SIZE
     num_epochs = config.training.NUM_EPOCHS
 
-    data = np.load(path_data)
-    # x = data['X']  # 'X' are the noise free process states.
-    x = data['Y']  # 'Y' is the process output (used as input here).
-    y = data['U']  # 'U' is the control signal (used as labels here).
+    data = pd.read_pickle(path_data)
 
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3)
-
-    train_dataset = mx.gluon.data.dataset.ArrayDataset(x_train, y_train)
-    train_data_loader = mx.gluon.data.DataLoader(
-        train_dataset, batch_size, shuffle=True, num_workers=num_cpus,
-        last_batch='rollover')
-
-    test_dataset = mx.gluon.data.dataset.ArrayDataset(x_test, y_test)
-    test_data_loader = mx.gluon.data.DataLoader(
-        test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
-        last_batch='discard')
+    test_data_loader, train_data_loader = get_data_loaders(data, config,
+                                                           'observations')
 
     model = create_model(trial)
     optimizer = create_optimizer(trial, batch_size)
@@ -155,8 +142,9 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
                             valid_loss / len(test_data_loader)))
 
     if save_model:
-        model.save_parameters(config.paths.PATH_MODEL)
-        print("Saved model to {}.".format(config.paths.PATH_MODEL))
+        path_model = config.paths.PATH_MODEL
+        model.save_parameters(path_model)
+        print(f"Saved model to {path_model}.")
 
     return valid_loss / len(test_data_loader)
 
@@ -164,7 +152,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
 if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
-    study_name = 'rnn'  # Unique identifier of the study.
+    study_name = 'rnn_high_noise'  # Unique identifier of the study.
     storage_name = 'sqlite:///{}.db'.format(study_name)
     study = optuna.create_study(storage_name, study_name=study_name,
                                 direction='minimize')
