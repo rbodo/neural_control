@@ -175,6 +175,30 @@ def plot_cost_heatmap(df, path=None, tail=None):
     plt.show()
 
 
+def plot_loss_heatmap(df, path=None, tail=None):
+    df = df[['process_noise', 'observation_noise', 'validation_loss']]
+    if tail is not None:
+        assert isinstance(tail, int)
+        df = df.groupby(['process_noise', 'observation_noise']).tail(tail)
+        if tail > 1:
+            df = df.groupby(['process_noise', 'observation_noise']).mean()
+        df = df.reset_index()
+    df = df.pivot(index='process_noise', columns='observation_noise',
+                  values='validation_loss')
+
+    df.rename(index=float2str, columns=float2str, inplace=True)
+
+    g = sns.heatmap(df, annot=True, fmt='.2%', linewidths=.5, square=True,
+                    robust=True)
+    g.set_xlabel('Observation noise')
+    g.set_ylabel('Process noise')
+    g.set_title('Validation loss (NRMSD of RNN and LQG output)')
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
 def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
                                      path=None):
 

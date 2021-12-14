@@ -2,8 +2,8 @@ import optuna
 import plotly.io as pio
 pio.renderers.default = 'png'
 
-study_name = 'rnn'
-storage_name = 'sqlite:///../../{}.db'.format(study_name)
+study_name = 'rnn_high_noise'
+storage_name = f'sqlite:///../../{study_name}.db'
 study = optuna.create_study(study_name=study_name, storage=storage_name,
                             load_if_exists=True)
 df = study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))

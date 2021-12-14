@@ -153,9 +153,9 @@ if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
     study_name = 'rnn_high_noise'  # Unique identifier of the study.
-    storage_name = 'sqlite:///{}.db'.format(study_name)
+    storage_name = f'sqlite:///{study_name}.db'
     study = optuna.create_study(storage_name, study_name=study_name,
-                                direction='minimize')
+                                direction='minimize', load_if_exists=False)
     study.optimize(objective, n_trials=1000, timeout=None,
                    show_progress_bar=True)
 

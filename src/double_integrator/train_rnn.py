@@ -91,6 +91,15 @@ def evaluate(model, test_data_loader, loss_function, hidden_init, context):
     return validation_loss
 
 
+class NRMSD(mx.gluon.loss.L2Loss):
+    def hybrid_forward(self, F, pred, label, sample_weight=None):
+        loss = super(NRMSD, self).hybrid_forward(F, pred, label, sample_weight)
+        if mx.is_np_array():
+            return loss / (F.np.max(label) - F.np.min(label))
+        else:
+            return loss / (F.max(label) - F.min(label))
+
+
 def train_single(config, verbose=True, plot_control=True, plot_loss=True,
                  save_model=True):
     context = mx.gpu(1) if mx.context.num_gpus() > 0 else mx.cpu()
@@ -115,7 +124,7 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     model.initialize(mx.init.Xavier(), context)
     # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
 
-    loss_function = mx.gluon.loss.L2Loss()
+    loss_function = NRMSD()  # mx.gluon.loss.L2Loss()
     trainer = mx.gluon.Trainer(model.collect_params(), optimizer,
                                {'learning_rate': lr,
                                 'rescale_grad': 1 / batch_size})
@@ -157,15 +166,14 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
             plt.ylabel('Control')
             plt.show()
 
-        if verbose or plot_loss:
-            validation_loss = evaluate(model, test_data_loader, loss_function,
-                                       hidden_init, context)
-            validation_loss_mean = validation_loss / len(test_data_loader)
-            validation_losses.append(validation_loss_mean)
-            if verbose:
-                print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
-                      "".format(epoch, time.time() - tic,
-                                training_loss_mean, validation_loss_mean))
+        validation_loss = evaluate(model, test_data_loader, loss_function,
+                                   hidden_init, context)
+        validation_loss_mean = validation_loss / len(test_data_loader)
+        validation_losses.append(validation_loss_mean)
+        if verbose:
+            print("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
+                  "".format(epoch, time.time() - tic,
+                            training_loss_mean, validation_loss_mean))
 
     if plot_loss:
         path_figures = config.paths.PATH_FIGURES
@@ -178,12 +186,15 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
         model.save_parameters(config.paths.FILEPATH_MODEL)
         print("Saved model to {}.".format(config.paths.FILEPATH_MODEL))
 
+    return training_losses, validation_losses
+
 
 def train_sweep(config):
     path, filename = os.path.split(config.paths.FILEPATH_MODEL)
     process_noises = config.process.PROCESS_NOISES
     observation_noises = config.process.OBSERVATION_NOISES
 
+    dfs = []
     config.defrost()
     for w, v in tqdm(product(process_noises, observation_noises)):
         path_model = os.path.join(path, get_model_name(filename, w, v))
@@ -191,12 +202,20 @@ def train_sweep(config):
         config.process.PROCESS_NOISES = [w]
         config.process.OBSERVATION_NOISES = [v]
 
-        train_single(config, verbose=True, plot_control=False)
+        t_loss, v_loss = train_single(config, verbose=True, plot_control=False)
+
+        dfs.append(pd.DataFrame({'process_noise': w,
+                                 'observation_noise': v,
+                                 'training_loss': t_loss,
+                                 'validation_loss': v_loss}))
+
+    df = pd.concat(dfs, ignore_index=True)
+    df.to_pickle(config.paths.FILEPATH_OUTPUT_DATA)
 
 
 if __name__ == '__main__':
     path_config = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                  'double_integrator/configs/config_train_rnn.py'
+                  'double_integrator/configs/config_train_rnn_small.py'
     _config = get_config(path_config)
 
     train_sweep(_config)

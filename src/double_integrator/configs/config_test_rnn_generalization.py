@@ -11,7 +11,7 @@ model_name = \
     get_model_name(model_name, PROCESS_NOISES[2], OBSERVATION_NOISES[2])
 
 base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
-            'generalization_' + os.path.splitext(model_name)[0]
+            'generalization/' + os.path.splitext(model_name)[0]
 cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
 cfg.paths.FILEPATH_INPUT_DATA = FILEPATH_OUTPUT_DATA
 cfg.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'rnn.pkl')
