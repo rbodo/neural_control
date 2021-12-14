@@ -9,7 +9,7 @@ from src.double_integrator.configs.config_collect_training_data import \
 base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp'
 cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
 cfg.paths.FILEPATH_INPUT_DATA = FILEPATH_OUTPUT_DATA
-cfg.paths.PATH_MODEL = os.path.join(base_path, 'models/mlp.params')
+cfg.paths.FILEPATH_MODEL = os.path.join(base_path, 'models/mlp.params')
 
 cfg.model = CfgNode()
 cfg.model.NUM_HIDDEN = 10

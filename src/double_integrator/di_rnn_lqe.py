@@ -3,24 +3,21 @@ import sys
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.control_systems import DiRnnLqe
+from src.double_integrator.control_systems import DiLqeRnn
 from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import create_plots
 from src.double_integrator.di_lqg import add_variables
 
 
-def run_single(system_open, system_closed, times, monitor, inits):
+def run_single(system, times, monitor, inits):
     x = inits['x']
     x_est = inits['x_est']
     Sigma = inits['Sigma']
     x_rnn = inits['x_rnn']
 
     for t in times:
-        u, x_rnn = system_closed.get_control(x_rnn, x_est)
-        x = system_open.step(t, x, u)
-        y = system_open.output(t, x, u)
-        x_est, Sigma = system_closed.apply_filter(t, x_est, Sigma, u, y)
-        c = system_closed.get_cost(x_est, u)
+        x, y, u, c, x_rnn, x_est, Sigma = system.step(t, x, x_rnn, x_est,
+                                                      Sigma)
 
         monitor.update_variables(t, states=x, outputs=y, control=u, cost=c,
                                  state_estimates=x_est)
@@ -41,15 +38,14 @@ def main(config):
                   'activation': config.model.ACTIVATION}
 
     # Create double integrator with RNN feedback.
-    system_closed = DiRnnLqe(process_noise, observation_noise, dt, RNG,
-                             config.controller.cost.lqr.Q,
-                             config.controller.cost.lqr.R,
-                             config.paths.PATH_MODEL, rnn_kwargs)
-    system_open = system_closed.system
+    system = DiLqeRnn(process_noise, observation_noise, dt, RNG,
+                      config.controller.cost.lqr.Q,
+                      config.controller.cost.lqr.R,
+                      config.paths.FILEPATH_MODEL, rnn_kwargs)
 
     # Sample some initial states.
-    X0 = system_closed.get_initial_states(config.process.STATE_MEAN,
-                                          config.process.STATE_COVARIANCE)
+    X0 = system.process.get_initial_states(config.process.STATE_MEAN,
+                                           config.process.STATE_COVARIANCE)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -63,11 +59,11 @@ def main(config):
                                   observation_noise=observation_noise)
 
         inits = {'x': x, 'x_est': mu0, 'Sigma': Sigma0,
-                 'x_rnn': np.zeros((system_closed.model.num_layers,
-                                    system_closed.model.num_hidden))}
-        run_single(system_open, system_closed, times, monitor, inits)
+                 'x_rnn': np.zeros((system.control.model.num_layers,
+                                    system.control.model.num_hidden))}
+        run_single(system, times, monitor, inits)
 
-        create_plots(monitor, config, system_closed, label, i, RNG)
+        create_plots(monitor, config, system, label, i, RNG)
 
 
 if __name__ == '__main__':

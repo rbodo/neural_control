@@ -3,7 +3,7 @@ import time
 
 from src.double_integrator.configs.config_rnn_defaults import cfg
 
-RANDOMIZE_WORKDIR = True
+RANDOMIZE_WORKDIR = False
 
 base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn'
 if RANDOMIZE_WORKDIR:

@@ -6,61 +6,16 @@ from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
                                          get_additive_white_gaussian_noise)
 
 
-class DI:
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None):
-        self.dt = dt
+class LQR:
+    def __init__(self, process, q=0.5, r=0.5):
 
-        self.n_x_process = 2  # Number of process states
-        self.n_y_process = 1  # Number of process outputs
-        self.n_u_process = 1  # Number of process inputs
-
-        # Dynamics matrix:
-        self.A = np.zeros((self.n_x_process, self.n_x_process))
-        self.A[0, 1] = 1
-
-        # Input matrix:
-        self.B = np.zeros((self.n_x_process, self.n_u_process))
-        self.B[1, 0] = 1  # Control only second state (acceleration).
-
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Only observe position.
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
-
-        # Process noise:
-        self.W = var_x * np.eye(self.n_x_process) if var_x else None
-
-        # Output noise:
-        self.V = var_y * np.eye(self.n_y_process) if var_y else None
-
-        ss = control.StateSpace(self.A, self.B, self.C, self.D, self.dt)
-        self.system = StochasticLinearIOSystem(ss, self.W, self.V, rng=rng)
-
-    def get_initial_states(self, mu, Sigma, n=1, rng=None):
-        return get_initial_states(mu, Sigma, self.n_x_process, n, rng)
-
-    def step(self, t, x, u):
-        return self.system.dynamics(t, x, u)
-
-
-class DiLqr(DI):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
-        super().__init__(var_x, var_y, dt, rng)
-
-        self.n_y_process = self.n_x_process  # Number of process outputs
-        self.n_y_control = self.n_u_process  # Number of control outputs
-
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Assume both states are perfectly observable.
-        self.C[1, 1] = 1
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
+        self.process = process
 
         # State cost matrix:
-        self.Q = q * np.eye(self.n_x_process)
+        self.Q = q * np.eye(self.process.num_states)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.n_y_control)
+        self.R = r * np.eye(self.process.num_inputs)
 
         # Feedback gain matrix:
         self.K = self.get_feedback_gain()
@@ -68,29 +23,34 @@ class DiLqr(DI):
     def get_feedback_gain(self):
         # Solve LQR. Returns state feedback gain K, solution S to Riccati
         # equation, and eigenvalues E of closed-loop system.
-        K, S, E = control.lqr(self.A, self.B, self.Q, self.R)
+        K, S, E = control.lqr(self.process.A, self.process.B, self.Q, self.R)
         return K
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
 
-    def get_control(self, x, u=None):
+    def get_control(self, x):
         return -self.K.dot(x)
 
-    def step(self, t, x, u):
-        return self.system.dynamics(t, x, self.get_control(x) + u)
+    def step(self, t, x):
+        u = self.get_control(x)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
+
+        return x, y, u, c
+
+    # noinspection PyUnusedLocal
+    def dynamics(self, t, x, u):
+        u = self.get_control(x)
+
+        return self.process.dynamics(t, x, u)
 
 
-class DiLqg(DiLqr):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
-        super().__init__(var_x, var_y, dt, rng, q, r)
+class LQE:
+    def __init__(self, process):
 
-        self.n_y_process = 1  # Number of process outputs
-
-        # Output matrices:
-        self.C = np.zeros((self.n_y_process, self.n_x_process))
-        self.C[0, 0] = 1  # Only observe position.
-        self.D = np.zeros((self.n_y_process, self.n_u_process))
+        self.process = process
 
         # Kalman gain matrix:
         self.L = self.get_Kalman_gain()
@@ -98,107 +58,120 @@ class DiLqg(DiLqr):
     def get_Kalman_gain(self):
         # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
         # equation, and eigenvalues F of estimator poles A-LC.
-        L, P, F = control.lqe(self.A, np.eye(self.n_x_process), self.C, self.W,
-                              self.V)
+        L, P, F = control.lqe(self.process.A,
+                              np.eye(len(self.process.A)),
+                              self.process.C,
+                              self.process.W,
+                              self.process.V)
         return L
 
-    def apply_filter(self, t, mu, Sigma, u, y, asymptotic=True):
-        mu = self.system.step(t, mu, u, deterministic=True)
+    def step(self, t, mu, Sigma, u, y, asymptotic=True):
+        mu = self.process.step(t, mu, u, deterministic=True)
 
         if asymptotic:
             L = self.L
         else:
-            Sigma = self.A @ Sigma @ self.A.T + self.W
-            L = Sigma @ self.C.T @ np.linalg.inv(self.C @ Sigma @ self.C.T +
-                                                 self.V)
-            Sigma = (1 - L @ self.C) @ Sigma
+            A = self.process.A
+            C = self.process.C
+            V = self.process.V
+            W = self.process.W
+            Sigma = A @ Sigma @ A.T + W
+            L = Sigma @ C.T @ np.linalg.inv(C @ Sigma @ C.T + V)
+            Sigma = (1 - L @ C) @ Sigma
 
-        mu += self.dt * L @ (y - self.system.output(t, mu, u,
-                                                    deterministic=True))
+        mu += self.process.dt * L @ (y - self.process.output(t, mu, u, True))
 
         return mu, Sigma
 
 
-class DiMlp(DI):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, path_model=None):
-        super().__init__(var_x, var_y, dt, rng)
+class LQG:
+    def __init__(self, process, q=0.5, r=0.5):
+        self.process = process
+        self.estimator = LQE(self.process)
+        self.control = LQR(self.process, q, r)
 
-        self.n_y_control = self.n_u_process
+    def step(self, t, x, x_est, Sigma):
+        u = self.control.get_control(x_est)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
+        c = self.control.get_cost(x, u)
+
+        return x, y, u, c, x_est, Sigma
+
+    # noinspection PyUnusedLocal
+    def dynamics(self, t, x, u):
+        # Skipping estimator step here, because this method is only evaluated
+        # for one time step to draw vector field.
+        u = self.control.get_control(x)
+
+        return self.process.dynamics(t, x, u)
+
+
+class MLP:
+    def __init__(self, process, q=0.5, r=0.5, path_model=None,
+                 model_kwargs: dict = None):
+
+        self.process = process
 
         # State cost matrix:
-        self.Q = q * np.eye(self.n_x_process)
+        self.Q = q * np.eye(self.process.num_states)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.n_y_control)
+        self.R = r * np.eye(self.process.num_inputs)
 
-        self.mlp = MLPModel(num_hidden)
-        # self.mlp.hybridize()
-        if path_model is None:
-            self.mlp.initialize()
-        else:
-            self.mlp.load_parameters(path_model)
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
-
-    def get_control(self, x):
-        # Add dummy dimension for batch size.
-        x = mx.nd.array(np.expand_dims(x, 0))
-        u = self.mlp(x)
-        return u.asnumpy()[0]
-
-    def step(self, t, x, u):
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(y) + u)
-
-
-class DiMlpLqe(DiLqg):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 num_hidden=1, path_model=None):
-        super().__init__(var_x, var_y, dt, rng, q, r)
-
-        self.model = MLPModel(num_hidden)
-        # self.mlp.hybridize()
+        self.model = MLPModel(**model_kwargs)
+        self.model.hybridize()
         if path_model is None:
             self.model.initialize()
         else:
             self.model.load_parameters(path_model)
 
-    def get_control(self, x, u=None):
+    def get_cost(self, x, u):
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
+
+    def get_control(self, x):
         # Add dummy dimension for batch size.
         x = mx.nd.array(np.expand_dims(x, 0))
         u = self.model(x)
         return u.asnumpy()[0]
 
-    def step(self, t, x, u):
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(y) + u)
+    def step(self, t, x, y):
+        u = self.get_control(y)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
+
+        return x, y, u, c
+
+    def dynamics(self, t, x, u):
+        y = self.process.output(t, x, u)
+        u = self.get_control(y)
+
+        return self.process.dynamics(t, x, u)
 
 
-class DiRnn(DI):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, rnn_kwargs: dict = None):
-        super().__init__(var_x, var_y, dt, rng)
-        # Here we use the noisy state measurements as input to the RNN.
+class RNN:
+    def __init__(self, process, q=0.5, r=0.5, path_model=None,
+                 model_kwargs: dict = None):
 
-        self.n_y_control = self.n_u_process
+        self.process = process
 
         # State cost matrix:
-        self.Q = q * np.eye(self.n_x_process)
+        self.Q = q * np.eye(self.process.num_states)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.n_y_control)
+        self.R = r * np.eye(self.process.num_inputs)
 
-        self.model = RNNModel(**rnn_kwargs)
-        # self.rnn.hybridize()
+        self.model = RNNModel(**model_kwargs)
+        self.model.hybridize()
         if path_model is None:
             self.model.initialize()
         else:
             self.model.load_parameters(path_model)
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
 
     def get_control(self, x, u):
         # Add dummy dimensions for shape [num_timesteps, batch_size,
@@ -209,40 +182,67 @@ class DiRnn(DI):
         y, x = self.model(u, x)
         return y.asnumpy().ravel(), x[0].asnumpy().ravel()
 
-    def step(self, t, x, u):
-        # Todo: The RNN hidden states need to be initialized better.
-        x_rnn = np.zeros((self.model.num_layers, self.model.num_hidden))
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(x_rnn, y)[0] + u)
+    def step(self, t, x, y, x_rnn):
+        u, x_rnn = self.get_control(x_rnn, y)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
+
+        return x, y, u, c, x_rnn
+
+    def dynamics(self, t, x, u):
+        x_rnn = np.zeros(self.model.num_hidden)
+        y = self.process.output(t, x, u)
+        u, x_rnn = self.get_control(x_rnn, y)
+
+        return self.process.dynamics(t, x, u)
 
 
-class DiRnnLqe(DiLqg):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, rnn_kwargs: dict = None):
-        super().__init__(var_x, var_y, dt, rng, q, r)
-        # Here we use the estimated states as input to the RNN. The LQR
-        # controller is replaced by the RNN.
+class LqeMlp:
+    def __init__(self, process, q=0.5, r=0.5, path_model=None,
+                 model_kwargs=None):
+        self.process = process
+        self.estimator = LQE(self.process)
+        self.control = MLP(self.process, q, r, path_model, model_kwargs)
 
-        self.model = RNNModel(**rnn_kwargs)
-        # self.rnn.hybridize()
-        if path_model is None:
-            self.model.initialize()
-        else:
-            self.model.load_parameters(path_model)
+    def step(self, t, x, x_est, Sigma):
+        u = self.control.get_control(x_est)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
+        c = self.control.get_cost(x_est, u)
 
-    def get_control(self, x, u=None):
-        # Add dummy dimensions for shape [num_timesteps, batch_size,
-        # num_states].
-        u = mx.nd.array(np.expand_dims(u, [0, 1]))
-        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
-        x = mx.nd.array(np.reshape(x, (-1, 1, self.model.num_hidden)))
-        y, x = self.model(u, x)
-        return y.asnumpy().ravel(), x[0].asnumpy().ravel()
+        return x, y, u, c, x_est, Sigma
 
-    def step(self, t, x, u):
-        x_rnn = np.zeros((self.model.num_layers, self.model.num_hidden))
-        y = self.system.output(t, x, u)
-        return self.system.dynamics(t, x, self.get_control(x_rnn, y)[0] + u)
+    def dynamics(self, t, x, u):
+        y = self.process.output(t, x, u)
+        u = self.control.get_control(y)
+
+        return self.process.dynamics(t, x, u)
+
+
+class LqeRnn:
+    def __init__(self, process, q=0.5, r=0.5, path_model=None,
+                 model_kwargs=None):
+        self.process = process
+        self.estimator = LQE(self.process)
+        self.control = RNN(self.process, q, r, path_model, model_kwargs)
+
+    def step(self, t, x, x_rnn, x_est, Sigma):
+        u, x_rnn = self.control.get_control(x_rnn, x_est)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
+        c = self.control.get_cost(x_est, u)
+
+        return x, y, u, c, x_rnn, x_est, Sigma
+
+    def dynamics(self, t, x, u):
+        x_rnn = np.zeros(self.control.model.num_hidden)
+        y = self.process.output(t, x, u)
+        u, x_rnn = self.control.get_control(x_rnn, y)
+
+        return self.process.dynamics(t, x, u)
 
 
 class StochasticLinearIOSystem(control.LinearIOSystem):
@@ -272,11 +272,120 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         else:
             raise NotImplementedError
 
+    def dynamics(self, t, x, u):
+        return super().dynamics(t, x, u)
+
     def output(self, t, x, u, deterministic=False):
         out = super().output(t, x, u)
         if self.V is not None and not deterministic:
             out += get_additive_white_gaussian_noise(self.V, rng=self.rng)
         return out
+
+    def get_initial_states(self, mu, Sigma, n=1):
+        return get_initial_states(mu, Sigma, len(self.A), n, self.rng)
+
+
+class DI(StochasticLinearIOSystem):
+    def __init__(self, num_inputs, num_outputs, num_states, var_x=0, var_y=0,
+                 dt=0.1, rng=None, **kwargs):
+
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
+        self.num_states = num_states
+
+        # Dynamics matrix:
+        A = np.zeros((self.num_states, self.num_states))
+        A[0, 1] = 1
+
+        # Input matrix:
+        B = np.zeros((self.num_states, self.num_inputs))
+        B[1, 0] = 1  # Control only second state (acceleration).
+
+        # Output matrices:
+        C = np.eye(self.num_outputs, self.num_states)
+        D = np.zeros((self.num_outputs, self.num_inputs))
+
+        # Process noise:
+        W = var_x * np.eye(self.num_states) if var_x else None
+
+        # Output noise:
+        V = var_y * np.eye(self.num_outputs) if var_y else None
+
+        ss = control.StateSpace(A, B, C, D, dt)
+        super().__init__(ss, W, V, rng, **kwargs)
+
+
+class DiOpen:
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None):
+        num_inputs = 1
+        num_outputs = 2
+        num_states = 2
+        self.process = DI(num_inputs, num_outputs, num_states,
+                          var_x, var_y, dt, rng)
+
+
+class DiLqr(LQR):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
+        num_inputs = 1
+        num_outputs = 2
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r)
+
+
+class DiLqg(LQG):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r)
+
+
+class DiMlp(MLP):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 path_model=None, model_kwargs=None):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r, path_model, model_kwargs)
+
+
+class DiLqeMlp(LqeMlp):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 path_model=None, model_kwargs=None):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r, path_model, model_kwargs)
+
+
+class DiRnn(RNN):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 path_model=None, model_kwargs: dict = None):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r, path_model, model_kwargs)
+
+
+class DiLqeRnn(LqeRnn):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 path_model=None, model_kwargs: dict = None):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r, path_model, model_kwargs)
 
 
 class RNNModel(mx.gluon.HybridBlock):

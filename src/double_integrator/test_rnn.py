@@ -49,8 +49,7 @@ def main(config):
             if not use_single_model:
                 path_model = os.path.join(path,
                                           get_model_name(model_name, w, v))
-            system_closed = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs)
-            system_open = system_closed.system
+            system = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs)
 
             _, test_data = split_train_test(select_noise_subset(data, w, v))
 
@@ -59,11 +58,11 @@ def main(config):
             for i, x in enumerate(X0):
 
                 monitor.update_parameters(experiment=i)
-                x_rnn = np.zeros((system_closed.model.num_layers,
-                                  system_closed.model.num_hidden))
-                y = system_open.output(0, x, 0)
+                x_rnn = np.zeros((system.model.num_layers,
+                                  system.model.num_hidden))
+                y = system.process.output(0, x, 0)
                 inits = {'x': x, 'x_rnn': x_rnn, 'y': y}
-                run_single(system_open, system_closed, times, monitor, inits)
+                run_single(system, times, monitor, inits)
 
     # Store state trajectories and corresponding control signals.
     df = monitor.get_dataframe()
@@ -74,8 +73,8 @@ if __name__ == '__main__':
 
     base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
                 'double_integrator/configs'
-    # filename = 'config_test_rnn.py'
-    filename = 'config_test_rnn_generalization.py'
+    filename = 'config_test_rnn.py'
+    # filename = 'config_test_rnn_generalization.py'
     _config = get_config(os.path.join(base_path, filename))
 
     main(_config)

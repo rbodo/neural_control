@@ -3,7 +3,7 @@ import sys
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.control_systems import DI
+from src.double_integrator.control_systems import DiOpen
 from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import create_plots
 
@@ -18,18 +18,18 @@ def main(config):
     dt = T / num_steps
 
     # Create double integrator in open loop configuration.
-    system_closed = DI(process_noise, observation_noise, dt, RNG)
-    system_open = system_closed.system
+    system = DiOpen(process_noise, observation_noise, dt, RNG)
 
     # Sample some initial states.
-    X0 = system_closed.get_initial_states(config.process.STATE_MEAN,
-                                          config.process.STATE_COVARIANCE)
+    X0 = system.process.get_initial_states(config.process.STATE_MEAN,
+                                           config.process.STATE_COVARIANCE)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
     monitor = Monitor()
     monitor.add_variable('states', 'States', column_labels=['x', 'v'])
-    monitor.add_variable('outputs', 'Output', column_labels=['y'])
+    monitor.add_variable('outputs', 'Output', column_labels=[r'$y_x$',
+                                                             r'$y_v$'])
 
     # Simulate the system without control.
     u = [0]
@@ -37,11 +37,11 @@ def main(config):
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
         for t in times:
-            x = system_open.step(t, x, u)
-            y = system_open.output(t, x, u)
+            x = system.process.step(t, x, u)
+            y = system.process.output(t, x, u)
             monitor.update_variables(t, states=x, outputs=y)
 
-        create_plots(monitor, config, system_closed, label, i, RNG)
+        create_plots(monitor, config, system.process, label, i, RNG)
 
 
 if __name__ == '__main__':

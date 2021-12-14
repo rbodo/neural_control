@@ -3,7 +3,7 @@ import sys
 import numpy as np
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.control_systems import DiMlpLqe
+from src.double_integrator.control_systems import DiLqeMlp
 from src.double_integrator.di_lqg import add_variables, run_single
 from src.double_integrator.utils import RNG, Monitor
 from src.double_integrator.plotting import create_plots
@@ -21,15 +21,14 @@ def main(config):
     Sigma0 = config.process.STATE_COVARIANCE * np.eye(len(mu0))
 
     # Create double integrator with MLP feedback.
-    system_closed = DiMlpLqe(process_noise, observation_noise, dt, RNG,
-                             config.controller.cost.lqr.Q,
-                             config.controller.cost.lqr.R,
-                             config.model.NUM_HIDDEN,
-                             config.paths.PATH_MODEL)
-    system_open = system_closed.system
+    system = DiLqeMlp(process_noise, observation_noise, dt, RNG,
+                      config.controller.cost.lqr.Q,
+                      config.controller.cost.lqr.R,
+                      config.paths.FILEPATH_MODEL,
+                      {'num_hidden': config.model.NUM_HIDDEN})
 
     # Sample some initial states.
-    X0 = system_closed.get_initial_states(mu0, Sigma0)
+    X0 = system.process.get_initial_states(mu0, Sigma0)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -42,9 +41,9 @@ def main(config):
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
         inits = {'x': x, 'x_est': mu0, 'Sigma': Sigma0}
-        run_single(system_open, system_closed, times, monitor, inits)
+        run_single(system, times, monitor, inits)
 
-        create_plots(monitor, config, system_closed, label, i, RNG)
+        create_plots(monitor, config, system, label, i, RNG)
 
 
 if __name__ == '__main__':

@@ -13,7 +13,9 @@ def add_variables(monitor: Monitor):
     kwargs = [
         dict(name='states', label='States', column_labels=['x', 'v'],
              dtype=dtype),
-        dict(name='outputs', label='Output', column_labels=['y'], dtype=dtype),
+        dict(name='outputs', label='Output', column_labels=[r'$y_x$',
+                                                            r'$y_v$'],
+             dtype=dtype),
         dict(name='control', label='Control', column_labels=['u'],
              dtype=dtype),
         dict(name='cost', label='Cost', column_labels=['c'], dtype=dtype)
@@ -22,14 +24,11 @@ def add_variables(monitor: Monitor):
         monitor.add_variable(**k)
 
 
-def run_single(system_open, system_closed, times, monitor, inits):
+def run_single(system, times, monitor, inits):
     x = inits['x']
 
     for t in times:
-        u = system_closed.get_control(x)
-        x = system_open.step(t, x, u)
-        y = system_open.output(t, x, u)
-        c = system_closed.get_cost(x, u)
+        x, y, u, c = system.step(t, x)
 
         monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
 
@@ -44,14 +43,12 @@ def main(config):
     dt = T / num_steps
 
     # Create double integrator with LQR feedback.
-    system_closed = DiLqr(process_noise, observation_noise, dt, RNG,
-                          config.controller.cost.lqr.Q,
-                          config.controller.cost.lqr.R)
-    system_open = system_closed.system
+    system = DiLqr(process_noise, observation_noise, dt, RNG,
+                   config.controller.cost.lqr.Q, config.controller.cost.lqr.R)
 
     # Sample some initial states.
-    X0 = system_closed.get_initial_states(config.process.STATE_MEAN,
-                                          config.process.STATE_COVARIANCE)
+    X0 = system.process.get_initial_states(config.process.STATE_MEAN,
+                                           config.process.STATE_COVARIANCE)
 
     times = np.linspace(0, T, num_steps, endpoint=False)
 
@@ -63,9 +60,9 @@ def main(config):
         monitor.update_parameters(experiment=i, process_noise=process_noise,
                                   observation_noise=observation_noise)
         inits = {'x': x}
-        run_single(system_open, system_closed, times, monitor, inits)
+        run_single(system, times, monitor, inits)
 
-        create_plots(monitor, config, system_closed, label, i, RNG)
+        create_plots(monitor, config, system, label, i, RNG)
 
 
 if __name__ == '__main__':

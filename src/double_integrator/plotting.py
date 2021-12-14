@@ -181,9 +181,9 @@ def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
     out = np.empty((len(process_noises), len(observation_noises)))
     for i, w in enumerate(process_noises):
         for j, v in enumerate(observation_noises):
-            system_closed = DiLqg(w, v)
-            out[i, j] = np.linalg.norm(system_closed.L, ord=np.inf)
-            # out[i, j] = np.max(system_closed.L)
+            system = DiLqg(w, v)
+            out[i, j] = np.linalg.norm(system.estimator.L, ord=np.inf)
+            # out[i, j] = np.max(system.estimator.L)
     df = pd.DataFrame(out,
                       [float2str(p) for p in process_noises],
                       [float2str(p) for p in observation_noises])
@@ -196,10 +196,9 @@ def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
     plt.show()
 
 
-def create_plots(monitor, config, system_closed=None, label=None, suffix=0,
-                 rng=None):
+def create_plots(monitor, config, system=None, label=None, suffix=0, rng=None):
     path_figures = config.paths.PATH_FIGURES
-    odefunc = None if system_closed is None else system_closed.step
+    odefunc = None if system is None else system.dynamics
 
     path = os.path.join(path_figures, f'timeseries_{label}_{suffix}')
     plot_timeseries(monitor.get_last_experiment(), path=path)

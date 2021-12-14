@@ -8,7 +8,6 @@ from tqdm.contrib import tzip
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiLqg
 from src.double_integrator.plotting import create_plots
-from src.double_integrator.di_lqr import add_variables as add_variables_lqr
 from src.double_integrator.utils import (RNG, Monitor,
                                          get_additive_white_gaussian_noise)
 
@@ -17,23 +16,29 @@ if TYPE_CHECKING:
 
 
 def add_variables(monitor: Monitor):
-    add_variables_lqr(monitor)
-    monitor.add_variable('state_estimates', 'States',
-                         column_labels=[r'$\hat{x}$', r'$\hat{v}$'],
-                         dtype='float32')
+    dtype = 'float32'
+    kwargs = [
+        dict(name='states', label='States', column_labels=['x', 'v'],
+             dtype=dtype),
+        dict(name='state_estimates', label='States',
+             column_labels=[r'$\hat{x}$', r'$\hat{v}$'], dtype=dtype),
+        dict(name='outputs', label='Output', column_labels=[r'$y_x$'],
+             dtype=dtype),
+        dict(name='control', label='Control', column_labels=['u'],
+             dtype=dtype),
+        dict(name='cost', label='Cost', column_labels=['c'], dtype=dtype)
+    ]
+    for k in kwargs:
+        monitor.add_variable(**k)
 
 
-def run_single(system_open, system_closed, times, monitor, inits):
+def run_single(system, times, monitor, inits):
     x = inits['x']
     x_est = inits['x_est']
     Sigma = inits['Sigma']
 
     for t in times:
-        u = system_closed.get_control(x_est)
-        x = system_open.step(t, x, u)
-        y = system_open.output(t, x, u)
-        x_est, Sigma = system_closed.apply_filter(t, x_est, Sigma, u, y)
-        c = system_closed.get_cost(x_est, u)
+        x, y, u, c, x_est, Sigma = system.step(t, x, x_est, Sigma)
 
         monitor.update_variables(t, states=x, outputs=y, control=u, cost=c,
                                  state_estimates=x_est)
@@ -86,20 +91,19 @@ def main(config: 'CfgNode', show_plots: bool = False):
         for v in tqdm(observation_noises, 'Observation noise'):
             monitor.update_parameters(observation_noise=v)
 
-            system_closed = DiLqg(w, v, dt, RNG, q, r)
-            system_open = system_closed.system
+            system = DiLqg(w, v, dt, RNG, q, r)
 
             # Initialize the state estimate.
-            X0_est = jitter(grid, system_closed.W, RNG)
+            X0_est = jitter(grid, system.process.W, RNG)
 
             for i, (x, x_est) in enumerate(tzip(X0, X0_est, leave=False)):
 
                 monitor.update_parameters(experiment=i)
                 inits = {'x': x, 'x_est': x_est, 'Sigma': Sigma0}
-                run_single(system_open, system_closed, times, monitor, inits)
+                run_single(system, times, monitor, inits)
 
                 if show_plots:
-                    create_plots(monitor, config, system_closed, label, i, RNG)
+                    create_plots(monitor, config, system, label, i, RNG)
 
     # Store state trajectories and corresponding control signals.
     df = monitor.get_dataframe()

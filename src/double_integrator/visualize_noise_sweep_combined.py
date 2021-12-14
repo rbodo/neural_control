@@ -4,8 +4,8 @@ import os
 import pandas as pd
 
 from src.double_integrator.configs.config import get_config
-from src.double_integrator.plotting import plot_cost_vs_noise, \
-    plot_cost_scatter
+from src.double_integrator.plotting import (plot_cost_vs_noise,
+                                            plot_cost_scatter)
 from src.double_integrator.utils import split_train_test
 
 
@@ -27,13 +27,18 @@ def main(config1, config2=None):
     path = os.path.join(path_figures, 'cost_vs_noise_combined.png')
     plot_cost_vs_noise(df, path)
 
-    df1 = df1.groupby(['process_noise', 'observation_noise', 'times'])['c'].mean()
-    df1 = df1.reset_index().rename(columns={'c': 'c_rnn'}).drop(columns='times')
+    df1 = df1.groupby(
+        ['process_noise', 'observation_noise', 'times'])['c'].mean()
+    df1 = df1.reset_index().rename(columns={'c': 'c_rnn'}).drop(
+        columns='times')
 
-    df2 = df2.groupby(['process_noise', 'observation_noise', 'times'])['c'].mean()
-    df2 = df2.reset_index().rename(columns={'c': 'c_lqg'}).drop(columns='times')
+    df2 = df2.groupby(
+        ['process_noise', 'observation_noise', 'times'])['c'].mean()
+    df2 = df2.reset_index().rename(columns={'c': 'c_lqg'}).drop(
+        columns='times')
 
-    df3 = pd.merge(df1.reset_index(), df2.reset_index(), how='left').drop(columns='index')
+    df3 = pd.merge(df1.reset_index(), df2.reset_index(),
+                   how='left').drop(columns='index')
 
     path = os.path.join(path_figures, 'cost_scatter_rnn_lqg.png')
     plot_cost_scatter(df3, path)
