@@ -48,7 +48,8 @@ if __name__ == '__main__':
 
     base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
                 'double_integrator/configs'
-    filename1 = 'config_test_rnn.py'
+    # filename1 = 'config_test_rnn.py'
+    filename1 = 'config_test_rnn_small.py'
     # filename1 = 'config_test_rnn_generalization.py'
     filename2 = 'config_collect_training_data.py'
     _config1 = get_config(os.path.join(base_path, filename1))

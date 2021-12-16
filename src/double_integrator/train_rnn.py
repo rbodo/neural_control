@@ -124,7 +124,7 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     model.initialize(mx.init.Xavier(), context)
     # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
 
-    loss_function = NRMSD()  # mx.gluon.loss.L2Loss()
+    loss_function = mx.gluon.loss.L2Loss()  # NRMSD()
     trainer = mx.gluon.Trainer(model.collect_params(), optimizer,
                                {'learning_rate': lr,
                                 'rescale_grad': 1 / batch_size})

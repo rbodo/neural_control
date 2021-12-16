@@ -153,7 +153,7 @@ class MLP:
 
 class RNN:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None):
+                 model_kwargs: dict = None, gpu=0):
 
         self.process = process
 
@@ -163,12 +163,13 @@ class RNN:
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs)
 
+        self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
         self.model = RNNModel(**model_kwargs)
         self.model.hybridize()
         if path_model is None:
-            self.model.initialize()
+            self.model.initialize(ctx=self.context)
         else:
-            self.model.load_parameters(path_model)
+            self.model.load_parameters(path_model, ctx=self.context)
 
     def get_cost(self, x, u):
         return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
@@ -176,9 +177,10 @@ class RNN:
     def get_control(self, x, u):
         # Add dummy dimensions for shape [num_timesteps, batch_size,
         # num_states].
-        u = mx.nd.array(np.expand_dims(u, [0, 1]))
+        u = mx.nd.array(np.expand_dims(u, [0, 1]), self.context)
         # Add dummy dimensions for shape [num_layers, batch_size, num_states].
-        x = mx.nd.array(np.reshape(x, (-1, 1, self.model.num_hidden)))
+        x = mx.nd.array(np.reshape(x, (-1, 1, self.model.num_hidden)),
+                        self.context)
         y, x = self.model(u, x)
         return y.asnumpy().ravel(), x[0].asnumpy().ravel()
 
@@ -368,13 +370,13 @@ class DiLqeMlp(LqeMlp):
 
 class DiRnn(RNN):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs: dict = None):
+                 path_model=None, model_kwargs: dict = None, gpu=0):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
         process = DI(num_inputs, num_outputs, num_states,
                      var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs)
+        super().__init__(process, q, r, path_model, model_kwargs, gpu)
 
 
 class DiLqeRnn(LqeRnn):

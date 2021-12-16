@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import logging
@@ -14,10 +15,13 @@ from src.double_integrator.train_rnn import get_data_loaders
 
 def create_model(trial):
     num_layers = trial.suggest_int('num_layers', 1, 2)
-    num_hidden = trial.suggest_int('num_hidden', 4, 64, log=True)
+    num_hidden = trial.suggest_int('num_hidden', 2, 64, log=True)
     activation = trial.suggest_categorical('activation', ['tanh', 'relu'])
     dropout = trial.suggest_float('dropout', 0, 1)
-    return RNNModel(num_hidden, num_layers, 1, activation, dropout)
+    neuron_model = trial.suggest_categorical('neuron_model',
+                                             ['rnn', 'gru', 'lstm'])
+    return RNNModel(num_hidden, num_layers, 1, activation, dropout,
+                    neuron_model)
 
 
 def create_optimizer(trial, batch_size=1):
@@ -45,7 +49,8 @@ def create_optimizer(trial, batch_size=1):
 class RNNModel(mx.gluon.HybridBlock):
 
     def __init__(self, num_hidden=1, num_layers=1, num_outputs=1,
-                 activation='tanh', dropout=0, **kwargs):
+                 activation='tanh', dropout=0, neuron_model='rnn',
+                 **kwargs):
 
         super().__init__(**kwargs)
 
@@ -53,27 +58,41 @@ class RNNModel(mx.gluon.HybridBlock):
         self.num_layers = num_layers
 
         with self.name_scope():
-            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers,
-                                        activation, dropout=dropout)
+            if neuron_model == 'rnn':
+                ModelClass = mx.gluon.rnn.RNN
+                cell_kwargs = {'hidden_size': num_hidden,
+                               'num_layers': num_layers,
+                               'activation': activation,
+                               'dropout': dropout}
+            elif neuron_model == 'gru':
+                ModelClass = mx.gluon.rnn.GRU
+                cell_kwargs = {'hidden_size': num_hidden,
+                               'num_layers': num_layers,
+                               'dropout': dropout}
+            elif neuron_model == 'lstm':
+                ModelClass = mx.gluon.rnn.LSTM
+                cell_kwargs = {'hidden_size': num_hidden,
+                               'num_layers': num_layers,
+                               'dropout': dropout}
+            else:
+                raise NotImplementedError
+
+            self.rnn = ModelClass(**cell_kwargs)
             self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
                                              in_units=num_hidden,
                                              flatten=False)
 
     # noinspection PyUnusedLocal
     def hybrid_forward(self, F, x, *args, **kwargs):
-        output, hidden = self.rnn(x, args[0])
+        output = self.rnn(x)
         decoded = self.decoder(output)
-        return decoded, hidden
+        return decoded
 
 
-def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
+def objective(trial, config, verbose=0, plot_accuracy=False, save_model=False):
     num_gpus = mx.context.num_gpus()
     context = mx.gpu(1) if num_gpus > 0 else mx.cpu()
     print(context)
-
-    config = get_config(
-        '/home/bodrue/PycharmProjects/neural_control/src/double_integrator/'
-        'configs/config_hyperparameter_rnn.py')
 
     path_data = config.paths.FILEPATH_INPUT_DATA
     batch_size = config.training.BATCH_SIZE
@@ -108,7 +127,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
             data = data.as_in_context(context)
             label = label.as_in_context(context)
             with autograd.record():
-                output, hidden = model(data, hidden_init)
+                output = model(data)
                 output = mx.nd.moveaxis(output, 0, -1)
                 loss = loss_function(output, label)
 
@@ -122,7 +141,7 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
             data = mx.nd.moveaxis(data, -1, 0)
             data = data.as_in_context(context)
             label = label.as_in_context(context)
-            output, hidden = model(data, hidden_init)
+            output = model(data)
             output = mx.nd.moveaxis(output, 0, -1)
             loss = loss_function(output, label)
             valid_loss += loss.mean().asscalar()
@@ -143,6 +162,8 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
 
     if save_model:
         path_model = config.paths.PATH_MODEL
+        path, ext = os.path.splitext(path_model)
+        path_model = path + str(trial.number) + ext
         model.save_parameters(path_model)
         print(f"Saved model to {path_model}.")
 
@@ -152,12 +173,19 @@ def objective(trial, verbose=0, plot_accuracy=False, save_model=False):
 if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
-    study_name = 'rnn_high_noise'  # Unique identifier of the study.
-    storage_name = f'sqlite:///{study_name}.db'
+    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
+                'double_integrator/'
+    filepath_config = os.path.join(
+        base_path, 'configs/config_hyperparameter_rnn_high_noise.py')
+    _config = get_config(filepath_config)
+    study_name = _config.paths.STUDY_NAME
+    filepath_output = _config.paths.FILEPATH_OUTPUT_DATA
+    storage_name = f'sqlite:///{filepath_output}'
     study = optuna.create_study(storage_name, study_name=study_name,
-                                direction='minimize', load_if_exists=False)
-    study.optimize(objective, n_trials=1000, timeout=None,
-                   show_progress_bar=True)
+                                direction='minimize', load_if_exists=True)
+
+    study.optimize(lambda t: objective(t, _config), n_trials=1000,
+                   timeout=None, show_progress_bar=True)
 
     print("Number of finished trials: ", len(study.trials))
 

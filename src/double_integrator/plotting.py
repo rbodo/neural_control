@@ -283,3 +283,22 @@ def plot_training_curve(train_loss, valid_loss, path=None,
     if path is not None:
         fig.savefig(path, bbox_inches='tight')
     plt.show()
+
+
+def plot_rnn_states_vs_lqe_estimates(df, path):
+    col_wrap = int(np.sqrt(df['process_noise'].nunique()))
+    g = sns.relplot(data=df, x=r'$\hat{x}$', y=r'$h_0$',
+                    hue='observation_noise', style='observation_noise',
+                    col='process_noise', col_wrap=col_wrap, kind='scatter',
+                    palette=sns.color_palette('coolwarm', as_cmap=True),
+                    facet_kws={'sharey': False}, alpha=0.5)
+
+    g.set_titles("Process noise: {col_name:.2}")
+    g.set_axis_labels('LQE estimates', 'RNN states')
+    g.legend.set_title('Observation noise')
+
+    format_legend(g.legend)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()

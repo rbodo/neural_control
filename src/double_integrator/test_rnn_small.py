@@ -7,10 +7,36 @@ from tqdm import tqdm
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import DiRnn
-from src.double_integrator.di_rnn import run_single, add_variables
+from src.double_integrator.di_rnn import add_variables as _add_variables
 from src.double_integrator.train_rnn import get_model_name, get_trajectories
 from src.double_integrator.utils import (RNG, Monitor, select_noise_subset,
                                          split_train_test)
+
+
+def add_variables(monitor: Monitor):
+    _add_variables(monitor)
+
+    dtype = 'float32'
+    kwargs = [
+        dict(name='rnn_states', label='States',
+             column_labels=[r'$h_0$', r'$h_1$'], dtype=dtype),
+        dict(name='state_estimates', label='States',
+             column_labels=[r'$\hat{x}$', r'$\hat{v}$'], dtype=dtype),
+    ]
+    for k in kwargs:
+        monitor.add_variable(**k)
+
+
+def run_single(system, times, monitor, inits, x_est):
+    x = inits['x']
+    x_rnn = inits['x_rnn']
+    y = inits['y']
+
+    for i, t in enumerate(times):
+        x, y, u, c, x_rnn = system.step(t, x, y, x_rnn)
+
+        monitor.update_variables(t, states=x, outputs=y, control=u, cost=c,
+                                 rnn_states=x_rnn, state_estimates=x_est[:, i])
 
 
 def main(config):
@@ -51,18 +77,20 @@ def main(config):
                                           get_model_name(model_name, w, v))
             system = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs, gpu)
 
-            _, test_data = split_train_test(select_noise_subset(data, w, v))
+            _, test_data = split_train_test(select_noise_subset(data, w, v),
+                                            0.01)
 
             X = get_trajectories(test_data, num_steps, 'states')
             X0 = X[:, :, 0]
-            for i, x in enumerate(X0):
+            X_est = get_trajectories(test_data, num_steps, 'estimates')
+            for i, (x, x_est) in enumerate(zip(X0, X_est)):
 
                 monitor.update_parameters(experiment=i)
                 x_rnn = np.zeros((system.model.num_layers,
                                   system.model.num_hidden))
                 y = system.process.output(0, x, 0)
                 inits = {'x': x, 'x_rnn': x_rnn, 'y': y}
-                run_single(system, times, monitor, inits)
+                run_single(system, times, monitor, inits, x_est)
 
     # Store state trajectories and corresponding control signals.
     df = monitor.get_dataframe()
@@ -73,8 +101,7 @@ if __name__ == '__main__':
 
     base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
                 'double_integrator/configs'
-    filename = 'config_test_rnn.py'
-    # filename = 'config_test_rnn_generalization.py'
+    filename = 'config_test_rnn_small.py'
     _config = get_config(os.path.join(base_path, filename))
 
     main(_config)
