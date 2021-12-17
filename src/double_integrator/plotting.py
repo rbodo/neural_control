@@ -302,3 +302,38 @@ def plot_rnn_states_vs_lqe_estimates(df, path):
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
     plt.show()
+
+
+def plot_rnn_gramians(df, path, n=-1, remove_outliers_below=None):
+    eigenvalues = df.applymap(lambda _x: np.linalg.eig(_x)[0])
+    controllability = np.array(eigenvalues['controllability'].to_list())[:, :n]
+    observability = np.array(eigenvalues['observability'].to_list())[:, :n]
+    colors = plt.get_cmap('coolwarm')(np.linspace(0, 1, len(observability)))
+
+    if remove_outliers_below is not None:
+        controllability[controllability < remove_outliers_below] = np.nan
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6), sharex='all')
+
+    for epoch, x in enumerate(controllability):
+        ax[0].plot(x, color=colors[epoch], label=str(epoch))
+
+    for epoch, x in enumerate(observability):
+        ax[1].plot(x, color=colors[epoch], label=str(epoch))
+
+    ax[0].set_title("Controllability")
+    ax[1].set_title("Observability")
+
+    # ax[0].set_ylim(1e-8, None)
+    ax[0].set_yscale('log')
+    ax[1].set_yscale('log')
+
+    ax[0].set_xlabel("Eigenvalue")
+    ax[1].set_xlabel("Eigenvalue")
+    ax[0].set_ylabel("Magnitude")
+
+    ax[0].legend(title="Iteration")
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()

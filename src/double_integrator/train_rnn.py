@@ -8,10 +8,12 @@ import mxnet as mx
 import pandas as pd
 from matplotlib import pyplot as plt
 from mxnet import autograd
-from tqdm import tqdm
+from tqdm import trange, tqdm
+from tqdm.contrib import tenumerate
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator.control_systems import RNNModel
+from src.double_integrator.emgr import emgr
 from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.utils import split_train_test, select_noise_subset
 
@@ -101,11 +103,12 @@ class NRMSD(mx.gluon.loss.L2Loss):
 
 
 def train_single(config, verbose=True, plot_control=True, plot_loss=True,
-                 save_model=True):
+                 save_model=True, compute_gramians=False):
     context = mx.gpu(1) if mx.context.num_gpus() > 0 else mx.cpu()
 
     num_hidden = config.model.NUM_HIDDEN
     num_layers = config.model.NUM_LAYERS
+    num_inputs = 1
     num_outputs = 1
     activation = config.model.ACTIVATION
     path_data = config.paths.FILEPATH_INPUT_DATA
@@ -113,6 +116,29 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     lr = config.training.LEARNING_RATE
     num_epochs = config.training.NUM_EPOCHS
     optimizer = config.training.OPTIMIZER
+    T = config.simulation.T
+    num_steps = config.simulation.NUM_STEPS
+    dt = T / num_steps
+
+    # noinspection PyUnusedLocal
+    def h(x, u, p, t):
+        _batch_size = 1
+        _num_steps = 1
+        u0 = mx.nd.empty((_num_steps, _batch_size, num_inputs), ctx=context)
+        u0[0, 0, :] = u
+        x0 = mx.nd.empty((num_layers, _batch_size, num_hidden), ctx=context)
+        x0[:, 0, :] = x
+        y, x1 = model.rnn.forward(u0, [x0])
+        return y, x1[0]
+
+    def f(x, u, p, t):
+        y, x1 = h(x, u, p, t)
+        return x1.asnumpy()[0, 0]
+
+    def g(x, u, p, t):
+        y, x1 = h(x, u, p, t)
+        z = model.decoder(y)
+        return z.asnumpy()[0]
 
     data = pd.read_pickle(path_data)
 
@@ -122,7 +148,6 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     model = RNNModel(num_hidden, num_layers, num_outputs, activation)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)
-    # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
 
     loss_function = mx.gluon.loss.L2Loss()  # NRMSD()
     trainer = mx.gluon.Trainer(model.collect_params(), optimizer,
@@ -131,14 +156,25 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
 
     hidden_init = mx.nd.zeros((num_layers, batch_size, model.num_hidden),
                               ctx=context)
+    s = [num_inputs, num_hidden, num_outputs]
+    _t = [dt, T]
     training_losses = []
     validation_losses = []
-    for epoch in range(num_epochs):
+    controllability_gramians = []
+    observability_gramians = []
+    for epoch in trange(num_epochs):
         training_loss = 0
         label = None
         output = None
         tic = time.time()
-        for data, label in train_data_loader:
+        for batch_idx, (data, label) in tenumerate(train_data_loader,
+                                                   leave=False):
+            if compute_gramians and batch_idx % 25 == 0:
+                g_c = emgr(f, g, s, _t, 'c')
+                g_o = emgr(f, g, s, _t, 'o')
+                controllability_gramians.append(g_c)
+                observability_gramians.append(g_o)
+
             # Move time axis from last to first position to conform to RNN
             # convention.
             data = mx.nd.moveaxis(data, -1, 0)
@@ -185,6 +221,12 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     if save_model:
         model.save_parameters(config.paths.FILEPATH_MODEL)
         print("Saved model to {}.".format(config.paths.FILEPATH_MODEL))
+
+    if compute_gramians:
+        df = pd.DataFrame({'controllability': controllability_gramians,
+                           'observability': observability_gramians})
+        path_out = config.paths.FILEPATH_OUTPUT_DATA
+        df.to_pickle(path_out)
 
     return training_losses, validation_losses
 

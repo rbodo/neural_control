@@ -112,8 +112,6 @@ def objective(trial, config, verbose=0, plot_accuracy=False, save_model=False):
     loss_function = mx.gluon.loss.L2Loss()
     trainer = mx.gluon.Trainer(model.collect_params(), optimizer)
 
-    hidden_init = mx.nd.zeros((model.num_layers, batch_size, model.num_hidden),
-                              ctx=context)
     valid_loss = 0
     for epoch in range(num_epochs):
         train_loss = 0
