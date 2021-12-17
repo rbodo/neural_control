@@ -14,10 +14,11 @@ def main(config):
     # Use output data file generated during testing.
     path_data = config.paths.FILEPATH_OUTPUT_DATA
     path_figures = config.paths.PATH_FIGURES
+    validation_fraction = config.training.VALIDATION_FRACTION
 
     df = pd.read_pickle(path_data)
 
-    _, df = split_train_test(df)
+    _, df = split_train_test(df, validation_fraction)
 
     path = os.path.join(path_figures, 'cost_heatmap.png')
     plot_cost_heatmap(df, path, 1)

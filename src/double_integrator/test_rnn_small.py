@@ -54,6 +54,7 @@ def main(config):
     observation_noises = config.process.OBSERVATION_NOISES
     q = config.controller.cost.lqr.Q
     r = config.controller.cost.lqr.R
+    validation_fraction = config.training.VALIDATION_FRACTION
     rnn_kwargs = {'num_layers': config.model.NUM_LAYERS,
                   'num_hidden': config.model.NUM_HIDDEN,
                   'activation': config.model.ACTIVATION}
@@ -65,11 +66,11 @@ def main(config):
     monitor = Monitor()
     add_variables(monitor)
 
-    for w in tqdm(process_noises, 'Process noise'):
+    for w in tqdm(process_noises, 'Process noise', leave=False):
 
         monitor.update_parameters(process_noise=w)
 
-        for v in tqdm(observation_noises, 'Observation noise'):
+        for v in tqdm(observation_noises, 'Observation noise', leave=False):
             monitor.update_parameters(observation_noise=v)
 
             if not use_single_model:
@@ -77,8 +78,8 @@ def main(config):
                                           get_model_name(model_name, w, v))
             system = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs, gpu)
 
-            _, test_data = split_train_test(select_noise_subset(data, w, v),
-                                            0.01)
+            _, test_data = split_train_test(
+                select_noise_subset(data, [w], [v]), validation_fraction)
 
             X = get_trajectories(test_data, num_steps, 'states')
             X0 = X[:, :, 0]

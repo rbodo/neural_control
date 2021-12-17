@@ -10,6 +10,7 @@ from src.double_integrator.utils import split_train_test
 
 
 def main(config1, config2=None):
+    validation_fraction = config2.training.VALIDATION_FRACTION
 
     # Use output data file generated during testing.
     path_data1 = config1.paths.FILEPATH_OUTPUT_DATA
@@ -18,7 +19,7 @@ def main(config1, config2=None):
 
     path_data2 = config2.paths.FILEPATH_OUTPUT_DATA
     df2 = pd.read_pickle(path_data2)
-    _, df2 = split_train_test(df2)
+    _, df2 = split_train_test(df2, validation_fraction)
     df2['controller'] = 'lqg'
 
     df = pd.concat([df1, df2], join='inner')

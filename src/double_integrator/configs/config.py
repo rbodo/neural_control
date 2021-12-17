@@ -17,6 +17,7 @@ config.training = CfgNode()
 config.training.BATCH_SIZE = 32
 config.training.LEARNING_RATE = 1e-3
 config.training.NUM_EPOCHS = 10
+config.training.VALIDATION_FRACTION = 0.2
 
 config.simulation = CfgNode()
 config.simulation.T = 10  # Simulation duration

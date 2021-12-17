@@ -28,6 +28,7 @@ def main(config):
     observation_noises = config.process.OBSERVATION_NOISES
     q = config.controller.cost.lqr.Q
     r = config.controller.cost.lqr.R
+    validation_fraction = config.training.VALIDATION_FRACTION
     rnn_kwargs = {'num_layers': config.model.NUM_LAYERS,
                   'num_hidden': config.model.NUM_HIDDEN,
                   'activation': config.model.ACTIVATION}
@@ -51,7 +52,8 @@ def main(config):
                                           get_model_name(model_name, w, v))
             system = DiRnn(w, v, dt, RNG, q, r, path_model, rnn_kwargs, gpu)
 
-            _, test_data = split_train_test(select_noise_subset(data, w, v))
+            _, test_data = split_train_test(
+                select_noise_subset(data, [w], [v]), validation_fraction)
 
             X = get_trajectories(test_data, num_steps, 'states')
             X0 = X[:, :, 0]
@@ -73,7 +75,8 @@ if __name__ == '__main__':
 
     base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
                 'double_integrator/configs'
-    filename = 'config_test_rnn.py'
+    # filename = 'config_test_rnn.py'
+    filename = 'config_test_rnn_ood.py'
     # filename = 'config_test_rnn_generalization.py'
     _config = get_config(os.path.join(base_path, filename))
 

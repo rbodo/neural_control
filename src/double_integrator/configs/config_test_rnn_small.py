@@ -12,3 +12,5 @@ if RANDOMIZE_WORKDIR:
 FILEPATH_MODEL = os.path.join(base_path, 'models/rnn.params')
 cfg.paths.FILEPATH_MODEL = FILEPATH_MODEL
 cfg.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'rnn.pkl')
+
+cfg.training.VALIDATION_FRACTION = 0.01

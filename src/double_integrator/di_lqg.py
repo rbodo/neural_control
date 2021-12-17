@@ -84,11 +84,11 @@ def main(config: 'CfgNode', show_plots: bool = False):
     monitor = Monitor()
     add_variables(monitor)
 
-    for w in tqdm(process_noises, 'Process noise'):
+    for w in tqdm(process_noises, 'Process noise', leave=False):
 
         monitor.update_parameters(process_noise=w)
 
-        for v in tqdm(observation_noises, 'Observation noise'):
+        for v in tqdm(observation_noises, 'Observation noise', leave=False):
             monitor.update_parameters(observation_noise=v)
 
             system = DiLqg(w, v, dt, RNG, q, r)

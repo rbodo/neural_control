@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from itertools import product
 from typing import Tuple
 
 import numpy as np
@@ -191,6 +192,14 @@ def split_train_test(data: pd.DataFrame, f: float = 0.2) \
     return data[mask_train], data[mask_test]
 
 
-def select_noise_subset(data, process_noise, observation_noise):
-    return data[(data['process_noise'] == process_noise) &
-                (data['observation_noise'] == observation_noise)]
+def select_noise_subset(data, process_noises, observation_noises):
+    print("Using (combinations of) the following noise levels:")
+    print(f"Process noise: {process_noises}")
+    print(f"Observation noise: {observation_noises}")
+
+    mask = False
+    for process_noise, observation_noise in product(process_noises,
+                                                    observation_noises):
+        mask |= ((data['process_noise'] == process_noise) &
+                 (data['observation_noise'] == observation_noise))
+    return data[mask]

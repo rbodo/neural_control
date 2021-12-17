@@ -56,12 +56,13 @@ def get_data_loaders(data, config, variable):
     num_cpus = max(os.cpu_count() // 2, 1)
     num_steps = config.simulation.NUM_STEPS
     batch_size = config.training.BATCH_SIZE
-    process_noise = config.process.PROCESS_NOISES[0]
-    observation_noise = config.process.OBSERVATION_NOISES[0]
+    validation_fraction = config.training.VALIDATION_FRACTION
+    process_noises = config.process.PROCESS_NOISES
+    observation_noises = config.process.OBSERVATION_NOISES
 
-    data = select_noise_subset(data, process_noise, observation_noise)
+    data = select_noise_subset(data, process_noises, observation_noises)
 
-    data_train, data_test = split_train_test(data)
+    data_train, data_test = split_train_test(data, validation_fraction)
 
     x_train = get_trajectories(data_train, num_steps, variable)
     y_train = get_control(data_train, num_steps)
@@ -238,7 +239,7 @@ def train_sweep(config):
 
     dfs = []
     config.defrost()
-    for w, v in tqdm(product(process_noises, observation_noises)):
+    for w, v in tqdm(product(process_noises, observation_noises), leave=False):
         path_model = os.path.join(path, get_model_name(filename, w, v))
         config.paths.FILEPATH_MODEL = path_model
         config.process.PROCESS_NOISES = [w]
@@ -256,9 +257,11 @@ def train_sweep(config):
 
 
 if __name__ == '__main__':
-    path_config = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                  'double_integrator/configs/config_train_rnn_small.py'
-    _config = get_config(path_config)
+    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
+                'double_integrator/configs'
+    # _filename = 'config_train_rnn.py'
+    _filename = 'config_train_rnn_small.py'
+    _config = get_config(os.path.join(base_path, _filename))
 
     train_sweep(_config)
 
