@@ -11,11 +11,12 @@ from mxnet import autograd
 from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel
 from src.double_integrator.emgr import emgr
 from src.double_integrator.plotting import plot_training_curve, float2str
-from src.double_integrator.utils import split_train_test, select_noise_subset
+from src.double_integrator.utils import (split_train_test, select_noise_subset,
+                                         apply_config)
 
 
 def get_model_name(filename, w, v):
@@ -257,11 +258,10 @@ def train_sweep(config):
 
 
 if __name__ == '__main__':
-    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                'double_integrator/configs'
-    # _filename = 'config_train_rnn.py'
-    _filename = 'config_train_rnn_small.py'
-    _config = get_config(os.path.join(base_path, _filename))
+    _config = configs.config_train_rnn_small.get_config()
+    # _config = configs.config_train_rnn.get_config()
+
+    apply_config(_config)
 
     train_sweep(_config)
 

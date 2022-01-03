@@ -9,8 +9,9 @@ import mxnet as mx
 from mxnet import autograd
 from matplotlib import pyplot as plt
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.train_rnn import get_data_loaders
+from src.double_integrator.utils import apply_config
 
 
 def create_model(trial):
@@ -171,11 +172,11 @@ def objective(trial, config, verbose=0, plot_accuracy=False, save_model=False):
 if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
-    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                'double_integrator/'
-    filepath_config = os.path.join(
-        base_path, 'configs/config_hyperparameter_rnn_high_noise.py')
-    _config = get_config(filepath_config)
+    _config = configs.config_hyperparameter_rnn_low_noise.get_config()
+    # _config = configs.config_hyperparameter_rnn_high_noise.get_config()
+
+    apply_config(_config)
+
     study_name = _config.paths.STUDY_NAME
     filepath_output = _config.paths.FILEPATH_OUTPUT_DATA
     storage_name = f'sqlite:///{filepath_output}'

@@ -8,8 +8,9 @@ from mxnet import autograd
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.control_systems import MLPModel
+from src.double_integrator.utils import apply_config
 
 
 def main():
@@ -18,8 +19,9 @@ def main():
     context = mx.gpu(1) if num_gpus > 0 else mx.cpu()
     print(context)
 
-    config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                        'double_integrator/configs/config_mlp.py')
+    config = configs.config_mlp.get_config()
+
+    apply_config(config)
 
     num_hidden = config.model.NUM_HIDDEN
     num_outputs = 1

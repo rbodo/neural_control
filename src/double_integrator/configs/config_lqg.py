@@ -1,20 +1,25 @@
 import os
 
-from src.double_integrator.configs.config import config as cfg
+from src.double_integrator import configs
 
-base_path = '/home/bodrue/Data/neural_control/double_integrator/lqg'
-cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
-cfg.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'lqg.pkl')
 
-cfg.simulation.T = 10
-cfg.simulation.NUM_STEPS = 1000
-cfg.simulation.GRID_SIZE = 1
 
-cfg.process.PROCESS_NOISES = [1e-2]
-cfg.process.OBSERVATION_NOISES = [1e-2]
-cfg.process.STATE_MEAN = [1, 0]
-cfg.process.STATE_COVARIANCE = 1e-1
+def get_config():
+    config = configs.config.get_config()
 
-cfg.controller.STATE_TARGET = [0, 0]
-cfg.controller.cost.lqr.Q = 0.5
-cfg.controller.cost.lqr.R = 0.5
+    base_path = '/home/bodrue/Data/neural_control/double_integrator/lqg'
+    config.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
+    config.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'lqg.pkl')
+
+    config.simulation.T = 10
+    config.simulation.NUM_STEPS = 100
+    config.simulation.GRID_SIZE = 1
+
+    config.process.PROCESS_NOISES = [1e-2]
+    config.process.OBSERVATION_NOISES = [1e-2]
+    config.process.STATE_MEAN = [1, 0]
+    config.process.STATE_COVARIANCE = 1e-1
+
+    config.controller.STATE_TARGET = [0, 0]
+
+    return config

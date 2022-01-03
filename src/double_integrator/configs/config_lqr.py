@@ -1,16 +1,20 @@
-from src.double_integrator.configs.config import config as cfg
+from src.double_integrator import configs
 
-cfg.paths.PATH_FIGURES = \
-    '/home/bodrue/Data/neural_control/double_integrator/lqr/figures/'
 
-cfg.simulation.T = 10
-cfg.simulation.NUM_STEPS = 1000
+def get_config():
+    config = configs.config.get_config()
 
-cfg.process.PROCESS_NOISES = [1e-2]
-cfg.process.OBSERVATION_NOISES = [0]
-cfg.process.STATE_MEAN = [1, 0]
-cfg.process.STATE_COVARIANCE = 1e-1
+    config.paths.PATH_FIGURES = \
+        '/home/bodrue/Data/neural_control/double_integrator/lqr/figures/'
 
-cfg.controller.STATE_TARGET = [0, 0]
-cfg.controller.cost.lqr.Q = 0.5
-cfg.controller.cost.lqr.R = 0.5
+    config.simulation.T = 10
+    config.simulation.NUM_STEPS = 100
+
+    config.process.PROCESS_NOISES = [1e-2]
+    config.process.OBSERVATION_NOISES = [0]
+    config.process.STATE_MEAN = [1, 0]
+    config.process.STATE_COVARIANCE = 1e-1
+
+    config.controller.STATE_TARGET = [0, 0]
+
+    return config

@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 from itertools import product
 from typing import Tuple
@@ -203,3 +204,25 @@ def select_noise_subset(data, process_noises, observation_noises):
         mask |= ((data['process_noise'] == process_noise) &
                  (data['observation_noise'] == observation_noise))
     return data[mask]
+
+
+def apply_config(config):
+    config.freeze()
+    create_paths(config)
+    save_config(config)
+
+
+def create_paths(config):
+    for k, p in config.paths.items():
+        if 'FILE' in k:
+            p = os.path.dirname(p)
+        if p:
+            os.makedirs(p, exist_ok=True)
+
+
+def save_config(config):
+    if config.paths.FILEPATH_OUTPUT_DATA:
+        path = os.path.join(os.path.dirname(
+            config.paths.FILEPATH_OUTPUT_DATA), '.config.txt')
+        with open(path, 'w') as f:
+            f.write(config.dump())

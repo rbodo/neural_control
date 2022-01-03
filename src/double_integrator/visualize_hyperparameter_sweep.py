@@ -4,15 +4,15 @@ import sys
 import optuna
 import plotly.io as pio
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
+from src.double_integrator.utils import apply_config
 
 pio.renderers.default = 'png'
 
-base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
-            'double_integrator/'
-filepath_config = os.path.join(
-    base_path, 'configs/config_hyperparameter_rnn_high_noise.py')
-config = get_config(filepath_config)
+# config = configs.config_hyperparameter_rnn_low_noise.get_config()
+config = configs.config_hyperparameter_rnn_high_noise.get_config()
+apply_config(config)
+
 study_name = config.paths.STUDY_NAME
 filepath_output = config.paths.FILEPATH_OUTPUT_DATA
 storage_name = f'sqlite:///{filepath_output}'

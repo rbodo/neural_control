@@ -5,10 +5,10 @@ import numpy as np
 from tqdm import tqdm
 from tqdm.contrib import tzip
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.control_systems import DiLqg
 from src.double_integrator.plotting import create_plots
-from src.double_integrator.utils import (RNG, Monitor,
+from src.double_integrator.utils import (RNG, Monitor, apply_config,
                                          get_additive_white_gaussian_noise)
 
 if TYPE_CHECKING:
@@ -112,8 +112,9 @@ def main(config: 'CfgNode', show_plots: bool = False):
 
 
 if __name__ == '__main__':
-    _config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_lqg.py')
+    _config = configs.config_lqg.get_config()
+
+    apply_config(_config)
 
     main(_config, show_plots=True)
 

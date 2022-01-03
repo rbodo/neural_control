@@ -2,9 +2,9 @@ import sys
 
 import numpy as np
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.control_systems import DiLqeRnn
-from src.double_integrator.utils import RNG, Monitor
+from src.double_integrator.utils import RNG, Monitor, apply_config
 from src.double_integrator.plotting import create_plots
 from src.double_integrator.di_lqg import add_variables
 
@@ -68,8 +68,9 @@ def main(config):
 
 if __name__ == '__main__':
 
-    _config = get_config('/home/bodrue/PycharmProjects/neural_control/src/'
-                         'double_integrator/configs/config_rnn_lqe.py')
+    _config = configs.config_rnn_lqe.get_config()
+
+    apply_config(_config)
 
     main(_config)
 

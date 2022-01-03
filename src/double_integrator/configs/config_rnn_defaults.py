@@ -2,28 +2,33 @@ import os
 
 from yacs.config import CfgNode
 
-from src.double_integrator.configs.config import config as cfg
-from src.double_integrator.configs.config_collect_training_data import (
-    PROCESS_NOISES, OBSERVATION_NOISES, FILEPATH_OUTPUT_DATA)
+from src.double_integrator import configs
 
-base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn'
-cfg.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
-cfg.paths.FILEPATH_INPUT_DATA = FILEPATH_OUTPUT_DATA
-cfg.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'output.pkl')
-cfg.paths.FILEPATH_MODEL = os.path.join(base_path, 'models/rnn.params')
 
-cfg.model = CfgNode()
-cfg.model.NUM_HIDDEN = 50
-cfg.model.NUM_LAYERS = 1
-cfg.model.ACTIVATION = 'relu'
+def get_config():
+    config = configs.config.get_config()
+    config2 = configs.config_collect_training_data.get_config()
 
-cfg.training.OPTIMIZER = 'adam'
+    base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn'
+    config.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
+    config.paths.FILEPATH_INPUT_DATA = config2.paths.FILEPATH_OUTPUT_DATA
+    config.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path, 'output.pkl')
+    config.paths.FILEPATH_MODEL = os.path.join(base_path, 'models/rnn.params')
 
-cfg.simulation.DO_WARMUP = False
+    config.model = CfgNode()
+    config.model.NUM_HIDDEN = 50
+    config.model.NUM_LAYERS = 1
+    config.model.ACTIVATION = 'relu'
 
-cfg.process.PROCESS_NOISES = PROCESS_NOISES
-cfg.process.OBSERVATION_NOISES = OBSERVATION_NOISES
-cfg.process.STATE_MEAN = [1, 0]
-cfg.process.STATE_COVARIANCE = 1e-1
+    config.training.OPTIMIZER = 'adam'
 
-cfg.controller.STATE_TARGET = [0, 0]
+    config.simulation.DO_WARMUP = False
+
+    config.process.PROCESS_NOISES = config2.process.PROCESS_NOISES
+    config.process.OBSERVATION_NOISES = config2.process.OBSERVATION_NOISES
+    config.process.STATE_MEAN = [1, 0]
+    config.process.STATE_COVARIANCE = 1e-1
+
+    config.controller.STATE_TARGET = [0, 0]
+
+    return config

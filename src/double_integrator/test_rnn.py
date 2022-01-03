@@ -5,12 +5,12 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from src.double_integrator.configs.config import get_config
+from src.double_integrator import configs
 from src.double_integrator.control_systems import DiRnn
 from src.double_integrator.di_rnn import run_single, add_variables
 from src.double_integrator.train_rnn import get_model_name, get_trajectories
 from src.double_integrator.utils import (RNG, Monitor, select_noise_subset,
-                                         split_train_test)
+                                         split_train_test, apply_config)
 
 
 def main(config):
@@ -73,12 +73,12 @@ def main(config):
 
 if __name__ == '__main__':
 
-    base_path = '/home/bodrue/PycharmProjects/neural_control/src/' \
-                'double_integrator/configs'
-    # filename = 'config_test_rnn.py'
-    filename = 'config_test_rnn_ood.py'
-    # filename = 'config_test_rnn_generalization.py'
-    _config = get_config(os.path.join(base_path, filename))
+    # _config = configs.config_test_rnn.get_config()
+    _config = configs.config_test_rnn_all_noises.get_config()
+    # _config = configs.config_test_rnn_ood.get_config()
+    # _config = configs.config_test_rnn_generalization.get_config()
+
+    apply_config(_config)
 
     main(_config)
 
