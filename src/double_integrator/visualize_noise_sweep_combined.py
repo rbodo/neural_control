@@ -8,10 +8,11 @@ import pandas as pd
 from src.double_integrator import configs
 from src.double_integrator.plotting import (plot_cost_vs_noise,
                                             plot_cost_scatter)
-from src.double_integrator.utils import split_train_test, apply_config
+from src.double_integrator.utils import split_train_test, apply_config, \
+    apply_timestamp
 
 
-def main(config_dict: OrderedDict):
+def main(config_dict: OrderedDict, path_out: str):
     label2, config2 = config_dict.popitem()
     label1, config1 = config_dict.popitem()
 
@@ -29,8 +30,7 @@ def main(config_dict: OrderedDict):
 
     df = pd.concat([df1, df2], join='inner')
 
-    path_figures = config1.paths.PATH_FIGURES
-    path = os.path.join(path_figures,
+    path = os.path.join(path_out,
                         f'cost_vs_noise_combined_{label1}_{label2}.png')
     plot_cost_vs_noise(df, path)
 
@@ -47,23 +47,28 @@ def main(config_dict: OrderedDict):
     df3 = pd.merge(df1.reset_index(), df2.reset_index(),
                    how='left').drop(columns='index')
 
-    path = os.path.join(path_figures, f'cost_scatter_{label1}_{label2}.png')
+    path = os.path.join(path_out, f'cost_scatter_{label1}_{label2}.png')
     plot_cost_scatter(df3, path)
 
 
 if __name__ == '__main__':
 
-    # _config1 = configs.config_test_rnn.get_config()
+    _config1 = configs.config_test_rnn.get_config()
     # _config1 = configs.config_test_rnn_generalization.get_config()
     # _config1 = configs.config_test_rnn_small.get_config()
-    _config1 = configs.config_test_rnn_all_noises.get_config()
-    _config2 = configs.config_test_rnn_ood.get_config()
-    # _config2 = configs.config_collect_training_data.get_config()
+    _config2 = configs.config_collect_training_data.get_config()
 
     apply_config(_config1)
     apply_config(_config2)
 
-    # main(OrderedDict([('rnn', _config1), ('lqg', _config2)]))
-    main(OrderedDict([('rnn_id', _config1), ('rnn_ood', _config2)]))
+    print(_config1)
+    print(_config2)
+
+    _path_out = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
+                'figures/noise_sweep'
+    _path_out = apply_timestamp(_path_out)
+    os.makedirs(_path_out, exist_ok=True)
+
+    main(OrderedDict([('rnn', _config1), ('lqg', _config2)]), _path_out)
 
     sys.exit()

@@ -10,6 +10,8 @@ if __name__ == '__main__':
 
     apply_config(_config)
 
+    print(_config)
+
     train_single(_config)
 
     sys.exit()

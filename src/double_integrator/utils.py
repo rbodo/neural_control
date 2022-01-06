@@ -1,4 +1,5 @@
 import os
+import time
 from collections import OrderedDict
 from itertools import product
 from typing import Tuple
@@ -226,3 +227,9 @@ def save_config(config):
             config.paths.FILEPATH_OUTPUT_DATA), '.config.txt')
         with open(path, 'w') as f:
             f.write(config.dump())
+
+
+def apply_timestamp(path, timestamp=None):
+    if timestamp is None:
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+    return os.path.join(path, timestamp)

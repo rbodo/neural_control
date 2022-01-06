@@ -5,15 +5,14 @@ import numpy as np
 from src.double_integrator import configs
 
 
-def get_config():
-    config = configs.config.get_config()
+def get_config(timestamp_workdir=None):
 
-    base_path = '/home/bodrue/Data/neural_control/double_integrator/lqg'
-    config.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
+    config = configs.config_collect_training_data.get_config(timestamp_workdir)
+
+    base_path = os.path.dirname(config.paths.FILEPATH_OUTPUT_DATA)
+
     config.paths.FILEPATH_OUTPUT_DATA = os.path.join(base_path,
                                                      'lqg_grid_ood.pkl')
-
-    config.simulation.GRID_SIZE = 100
 
     config.process.PROCESS_NOISES = np.logspace(-1.9, -0.9, 5,
                                                 dtype='float32').tolist()

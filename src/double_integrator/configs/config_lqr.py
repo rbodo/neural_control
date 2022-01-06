@@ -1,11 +1,16 @@
+import os
+
 from src.double_integrator import configs
+from src.double_integrator.utils import apply_timestamp
 
 
-def get_config():
+def get_config(timestamp_workdir=None):
     config = configs.config.get_config()
 
-    config.paths.PATH_FIGURES = \
-        '/home/bodrue/Data/neural_control/double_integrator/lqr/figures/'
+    base_path = '/home/bodrue/Data/neural_control/double_integrator/lqr'
+    base_path = apply_timestamp(base_path, timestamp_workdir)
+
+    config.paths.PATH_FIGURES = os.path.join(base_path, 'figures')
 
     config.simulation.T = 10
     config.simulation.NUM_STEPS = 100

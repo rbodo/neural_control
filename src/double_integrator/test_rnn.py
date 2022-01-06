@@ -74,11 +74,13 @@ def main(config):
 if __name__ == '__main__':
 
     # _config = configs.config_test_rnn.get_config()
-    _config = configs.config_test_rnn_all_noises.get_config()
-    # _config = configs.config_test_rnn_ood.get_config()
+    # _config = configs.config_test_rnn_all_noises.get_config()
+    _config = configs.config_test_rnn_ood.get_config()
     # _config = configs.config_test_rnn_generalization.get_config()
 
     apply_config(_config)
+
+    print(_config)
 
     main(_config)
 
