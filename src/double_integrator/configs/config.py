@@ -28,7 +28,7 @@ def get_config() -> CfgNode:
     config.process = CfgNode()
     config.process.PROCESS_NOISES = [0.]
     config.process.OBSERVATION_NOISES = [0.]
-    config.process.STATE_MEAN = [0, 0]  # For sampling initial state values
+    config.process.STATE_MEAN = [1, 0]  # For sampling initial state values
     config.process.STATE_COVARIANCE = 1e-1  # For sampling initial state values
 
     config.controller = CfgNode()
@@ -36,7 +36,7 @@ def get_config() -> CfgNode:
     config.controller.cost.lqr = CfgNode()
     config.controller.cost.lqr.Q = 0.5  # Scale factor for state cost
     config.controller.cost.lqr.R = 0.5  # Scale factor for control cost
-    config.controller.STATE_TARGET = []
+    config.controller.STATE_TARGET = [0, 0]
 
     config.model = CfgNode()
     config.model.USE_SINGLE_MODEL_IN_SWEEP = False  # Concerns RNN noise sweep.

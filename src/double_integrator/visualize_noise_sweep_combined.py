@@ -8,8 +8,7 @@ import pandas as pd
 from src.double_integrator import configs
 from src.double_integrator.plotting import (plot_cost_vs_noise,
                                             plot_cost_scatter)
-from src.double_integrator.utils import split_train_test, apply_config, \
-    apply_timestamp
+from src.double_integrator.utils import split_train_test, apply_timestamp
 
 
 def main(config_dict: OrderedDict, path_out: str):
@@ -53,13 +52,11 @@ def main(config_dict: OrderedDict, path_out: str):
 
 if __name__ == '__main__':
 
-    _config1 = configs.config_test_rnn.get_config()
+    _config1 = configs.config_test_rnn.get_config('20211231_000005')
     # _config1 = configs.config_test_rnn_generalization.get_config()
     # _config1 = configs.config_test_rnn_small.get_config()
-    _config2 = configs.config_collect_training_data.get_config()
-
-    apply_config(_config1)
-    apply_config(_config2)
+    _config2 = \
+        configs.config_collect_training_data.get_config('20211231_000000')
 
     print(_config1)
     print(_config2)

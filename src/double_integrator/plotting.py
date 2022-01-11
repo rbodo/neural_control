@@ -137,6 +137,20 @@ def plot_cost_vs_noise(df, path=None):
     plt.show()
 
 
+def plot_cost_vs_time(df, path=None):
+    # df = df.loc[df['observation_noise'] != df['observation_noise'].max()]
+    g = sns.lineplot(data=df, x='times', y='c', style='controller',
+                     hue='testset')
+    g.set(yscale='log')
+    plt.xlabel('Time')
+    plt.ylabel('Cost')
+    plt.ylim(1e-3, 1e-1)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
 def plot_cost_heatmap(df, path=None, tail=None):
     df = df[['experiment', 'process_noise', 'observation_noise', 'c']]
     if tail is not None:

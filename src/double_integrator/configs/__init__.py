@@ -5,6 +5,7 @@ from src.double_integrator.configs import (
     config_hyperparameter_rnn_high_noise,
     config_hyperparameter_rnn_low_noise,
     config_lqg,
+    config_lqg_generalization,
     config_lqr,
     config_mlp,
     config_mlp_lqe,
