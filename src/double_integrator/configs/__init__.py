@@ -19,6 +19,7 @@ from src.double_integrator.configs import (
     config_test_rnn_ood,
     config_test_rnn_small,
     config_train_rnn,
+    config_train_rnn_reinforce,
     config_train_rnn_all_noises,
     config_train_rnn_gramian_high_noise,
     config_train_rnn_gramian_low_noise,
