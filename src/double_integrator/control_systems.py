@@ -7,15 +7,16 @@ from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
 
 
 class LQR:
-    def __init__(self, process, q=0.5, r=0.5):
+    def __init__(self, process, q=0.5, r=0.5, dtype='float32'):
 
         self.process = process
+        self.dtype = dtype
 
         # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states)
+        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs)
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
         # Feedback gain matrix:
         self.K = self.get_feedback_gain()
@@ -48,9 +49,10 @@ class LQR:
 
 
 class LQE:
-    def __init__(self, process):
+    def __init__(self, process, dtype='float32'):
 
         self.process = process
+        self.dtype = dtype
 
         # Kalman gain matrix:
         self.L = self.get_Kalman_gain()
@@ -59,7 +61,7 @@ class LQE:
         # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
         # equation, and eigenvalues F of estimator poles A-LC.
         L, P, F = control.lqe(self.process.A,
-                              np.eye(len(self.process.A)),
+                              np.eye(len(self.process.A), dtype=self.dtype),
                               self.process.C,
                               self.process.W,
                               self.process.V)
@@ -110,15 +112,16 @@ class LQG:
 
 class MLP:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None):
+                 model_kwargs: dict = None, dtype='float32'):
 
         self.process = process
+        self.dtype = dtype
 
         # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states)
+        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs)
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
         self.model = MLPModel(**model_kwargs)
         self.model.hybridize()
@@ -153,15 +156,16 @@ class MLP:
 
 class RNN:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, gpu=0):
+                 model_kwargs: dict = None, gpu=0, dtype='float32'):
 
         self.process = process
+        self.dtype = dtype
 
         # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states)
+        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
 
         # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs)
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
         self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
         self.model = RNNModel(**model_kwargs)
@@ -193,7 +197,7 @@ class RNN:
         return x, y, u, c, x_rnn
 
     def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.model.num_hidden)
+        x_rnn = np.zeros(self.model.num_hidden, self.dtype)
         y = self.process.output(t, x, u)
         u, x_rnn = self.get_control(x_rnn, y)
 
@@ -225,8 +229,9 @@ class LqeMlp:
 
 class LqeRnn:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs=None):
+                 model_kwargs=None, dtype='float32'):
         self.process = process
+        self.dtype = dtype
         self.estimator = LQE(self.process)
         self.control = RNN(self.process, q, r, path_model, model_kwargs)
 
@@ -240,7 +245,7 @@ class LqeRnn:
         return x, y, u, c, x_rnn, x_est, Sigma
 
     def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.control.model.num_hidden)
+        x_rnn = np.zeros(self.control.model.num_hidden, self.dtype)
         y = self.process.output(t, x, u)
         u, x_rnn = self.control.get_control(x_rnn, y)
 
@@ -260,15 +265,17 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         self.W = W
         self.V = V
         self.rng = rng
+        self.dtype = kwargs['dtype'] if 'dtype' in kwargs else 'float32'
 
     def step(self, t, x, u, method='euler-maruyama', deterministic=False):
-        dxdt = super().dynamics(t, x, u)
+        dxdt = super().dynamics(t, x, u).astype(self.dtype)
 
         if method == 'euler-maruyama':
             x_new = x + self.dt * dxdt
             if self.W is not None and not deterministic:
                 dW = get_additive_white_gaussian_noise(
-                    np.eye(len(x)) * np.sqrt(self.dt), rng=self.rng)
+                    np.eye(len(x), dtype=self.dtype) * np.sqrt(self.dt),
+                    rng=self.rng, dtype=self.dtype)
                 x_new += np.dot(self.W, dW)
             return x_new
         else:
@@ -278,7 +285,7 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         return super().dynamics(t, x, u)
 
     def output(self, t, x, u, deterministic=False):
-        out = super().output(t, x, u)
+        out = super().output(t, x, u).astype(self.dtype)
         if self.V is not None and not deterministic:
             out += get_additive_white_gaussian_noise(self.V, rng=self.rng)
         return out
@@ -294,24 +301,27 @@ class DI(StochasticLinearIOSystem):
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
         self.num_states = num_states
+        self.dtype = kwargs['dtype'] if 'dtype' in kwargs else 'float32'
 
         # Dynamics matrix:
-        A = np.zeros((self.num_states, self.num_states))
+        A = np.zeros((self.num_states, self.num_states), self.dtype)
         A[0, 1] = 1
 
         # Input matrix:
-        B = np.zeros((self.num_states, self.num_inputs))
+        B = np.zeros((self.num_states, self.num_inputs), self.dtype)
         B[1, 0] = 1  # Control only second state (acceleration).
 
         # Output matrices:
-        C = np.eye(self.num_outputs, self.num_states)
-        D = np.zeros((self.num_outputs, self.num_inputs))
+        C = np.eye(self.num_outputs, self.num_states, dtype=self.dtype)
+        D = np.zeros((self.num_outputs, self.num_inputs), self.dtype)
 
         # Process noise:
-        W = var_x * np.eye(self.num_states) if var_x else None
+        W = var_x * np.eye(self.num_states, dtype=self.dtype) if var_x \
+            else None
 
         # Output noise:
-        V = var_y * np.eye(self.num_outputs) if var_y else None
+        V = var_y * np.eye(self.num_outputs, dtype=self.dtype) if var_y \
+            else None
 
         ss = control.StateSpace(A, B, C, D, dt)
         super().__init__(ss, W, V, rng, **kwargs)

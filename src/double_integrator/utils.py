@@ -129,43 +129,49 @@ class Monitor:
 
 
 def get_additive_white_gaussian_noise(cov, size=None, rng=None,
-                                      method='cholesky'):
+                                      method='cholesky', dtype='float32'):
     if rng is None:
         rng = np.random.default_rng()
 
-    return get_gaussian_noise(np.zeros(len(cov)), cov, size, rng, method)
+    return get_gaussian_noise(np.zeros(len(cov), dtype), cov, size, rng,
+                              method)
 
 
-def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky'):
+def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky',
+                       dtype=None):
     if rng is None:
         rng = np.random.default_rng()
+    if dtype is None:
+        dtype = 'float32'
 
     # Check for off-diagonal terms. If components are independent, can use more
     # efficient computation.
     is_correlated = np.count_nonzero(cov - np.diag(np.diagonal(cov))) > 0
     if is_correlated:  # Expensive
-        return rng.multivariate_normal(mean, cov, size, method=method)
+        return rng.multivariate_normal(mean, cov, size, method=method,
+                                       dtype=dtype)
 
     # Use one-dimensional standard normal distribution (cheaper). Have to
     # account for possible shape specifications.
     if size is None:
-        return mean + rng.standard_normal() * np.diagonal(cov)
+        return mean + rng.standard_normal(dtype=dtype) * np.diagonal(cov)
     elif isinstance(size, int):
         return np.expand_dims(mean, 0) + \
-               np.outer(rng.standard_normal(size), np.diagonal(cov))
+               np.outer(rng.standard_normal(size, dtype), np.diagonal(cov))
     else:
         return np.expand_dims(mean, 0) + \
-               np.expand_dims(rng.standard_normal(size), -1) * np.diagonal(cov)
+               np.expand_dims(rng.standard_normal(size,dtype), -1) * \
+               np.diagonal(cov)
 
 
-def get_initial_states(mean, cov, num_states, n=1, rng=None):
+def get_initial_states(mean, cov, num_states, n=1, rng=None, dtype='float32'):
     if np.isscalar(mean):
-        mean *= np.ones(num_states)
+        mean *= np.ones(num_states, dtype)
     else:
-        assert np.array(mean).shape == (num_states,)
+        assert np.array(mean, dtype).shape == (num_states,)
 
     if np.isscalar(cov):
-        cov = cov * np.eye(num_states)
+        cov = cov * np.eye(num_states, dtype=dtype)
 
     return get_gaussian_noise(mean, cov, n, rng)
 
@@ -173,7 +179,8 @@ def get_initial_states(mean, cov, num_states, n=1, rng=None):
 def get_lqr_cost(x, u, Q, R, dt=1, sign=1):
     """Compute cost of an LQR system."""
 
-    return sign * dt * (np.dot(x, np.dot(Q, x)) + np.dot(u, np.dot(R, u)))
+    return np.float32(sign) * dt * (np.dot(x, np.dot(Q, x)) +
+                                    np.dot(u, np.dot(R, u)))
 
 
 def get_lqr_cost_vectorized(x, u, Q, R, dt=1, sign=1):
