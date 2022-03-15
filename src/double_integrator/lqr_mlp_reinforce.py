@@ -6,6 +6,8 @@ from itertools import product, count
 import numpy as np
 import pandas as pd
 import torch
+from torch.distributions import Normal
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import torch.nn as nn
 
@@ -19,27 +21,26 @@ from src.double_integrator.utils import apply_config, RNG, Monitor, \
     get_lqr_cost
 
 
-class RNNModel(nn.Module):
+class PolicyModel(nn.Module):
 
-    def __init__(self, num_inputs=1, num_hidden=1, num_layers=1, num_outputs=1,
-                 activation='relu'):
+    def __init__(self, num_inputs=1, num_hidden=1, num_outputs=1):
 
         super().__init__()
 
         self.num_hidden = num_hidden
-        self.num_layers = num_layers
 
-        self.rnn = nn.RNN(input_size=num_inputs, hidden_size=num_hidden,
-                          num_layers=num_layers, nonlinearity=activation)
+        self.hidden = nn.Linear(num_inputs, num_hidden)
         self.decoder = nn.Linear(num_hidden, num_outputs)
+        # self.decoder = nn.Linear(num_inputs, num_outputs)
 
-    def forward(self, x, *args):
-        output, hidden = self.rnn(x, args[0])
-        decoded = torch.tanh(self.decoder(output))
-        return decoded, hidden
+    def forward(self, x):
+        x = self.hidden(x)
+        x = torch.relu(x)
+        x = self.decoder(x)
+        return x
 
 
-class RNN:
+class Policy:
     def __init__(self, process, q=0.5, r=0.5, model_kwargs: dict = None,
                  gpu: int = 0, dtype='float32'):
 
@@ -53,42 +54,60 @@ class RNN:
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs, dtype=dtype)
 
-        self.model = RNNModel(**model_kwargs)
+        self.model = PolicyModel(**model_kwargs)
+        initialize_with_lqr = False
+        if initialize_with_lqr:
+            dtype_torch = getattr(torch, dtype)
+            with torch.no_grad():
+                self.model.decoder.weight = torch.nn.Parameter(
+                    torch.tensor([[-1, -np.sqrt(2)], [0, 0]], dtype_torch))
+                self.model.decoder.bias = torch.nn.Parameter(
+                    torch.tensor([0, 1e-3], dtype_torch))
         self.device = torch.device(f'cuda:{gpu}')
         self.model.to(self.device)
 
     def get_cost(self, x, u):
         return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
 
-    def get_control(self, x, u):
+    def get_control(self, u):
         # Add dummy dimensions for shape [num_timesteps, batch_size,
         # num_states].
-        u = torch.from_numpy(np.expand_dims(u, [0, 1])).to(self.device)
-        y, x = self.model(u, x)
-        return y.squeeze(), x
+        u = torch.from_numpy(np.expand_dims(u, 0)).to(self.device)
+        y = self.model(u)
+        return y.squeeze()
 
-    def step(self, t, x, y, x_rnn):
-        u, x_rnn = self.get_control(x_rnn, y)
-        u_numpy = np.array(u.clone().detach().cpu(), self.dtype, ndmin=1)
-        x = self.process.step(t, x, u_numpy)
-        y = self.process.output(t, x, u_numpy)
-        c = self.get_cost(x, u_numpy)
+    def step(self, t, x, y):
+        out = self.get_control(y)
+        # mean = out
+        # var = 1e-3
+        mean = torch.tanh(out[0])
+        # mean = out[0]
+        var = torch.sigmoid(out[1])
+        m = Normal(mean, var)
+        u = m.sample()
+        logprob = torch.unsqueeze(m.log_prob(u), 0)
+        u = np.array(u.clone().detach().cpu(), self.dtype, ndmin=1)
+        # u = -np.dot([[1, np.sqrt(2)]], y)
+        # logprob = 1
+        x = self.process.step(t, x, u)
+        x[0] = np.clip(x[0], -1, 1)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
 
-        return x, y, u, u_numpy, c, x_rnn
+        return x, y, u, c, logprob
 
     def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.model.num_hidden, self.dtype)
         y = self.process.output(t, x, u)
-        u, x_rnn = self.get_control(x_rnn, y)
+        u = self.get_control(y)
 
         return self.process.dynamics(t, x, u)
 
 
-class DiRnn(RNN):
+class DiMLP(Policy):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  model_kwargs: dict = None, gpu: int = 0, dtype='float32'):
         num_inputs = 1
-        num_outputs = 1
+        num_outputs = 2
         num_states = 2
         process = DI(num_inputs, num_outputs, num_states,
                      var_x, var_y, dt, rng)
@@ -112,17 +131,20 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     beta = 0.05
     epsilon = np.finfo(np.float32).eps.item()
     cost_discount = 0.99
-    reward_threshold = 1e-3
+    reward_threshold = -1e-1
     max_num_episodes = 10000
-    rnn_kwargs = {'num_inputs': 1,
-                  'num_layers': config.model.NUM_LAYERS,
-                  'num_hidden': config.model.NUM_HIDDEN,
-                  'activation': config.model.ACTIVATION}
+    gpu = 2
+    torch.manual_seed(54)
+    writer = SummaryWriter(config.paths.PATH_BASE)
 
-    # Create double integrator with RNN feedback.
-    system = DiRnn(process_noise, observation_noise, dt, RNG,
+    model_kwargs = {'num_inputs': 2,
+                    'num_hidden': config.model.NUM_HIDDEN,
+                    'num_outputs': 2}
+
+    # Create double integrator with MLP feedback.
+    system = DiMLP(process_noise, observation_noise, dt, RNG,
                    config.controller.cost.lqr.Q, config.controller.cost.lqr.R,
-                   model_kwargs=rnn_kwargs, dtype=dtype)
+                   model_kwargs=model_kwargs, dtype=dtype, gpu=gpu)
 
     model = system.model
     device = system.device
@@ -133,6 +155,9 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
 
     # Initialize the state vectors at each jittered grid location.
     X0 = jitter(grid, Sigma0, RNG).astype(dtype)
+
+    writer.add_graph(model, torch.from_numpy(np.expand_dims(X0[0], 0)).to(
+        device))
 
     times = np.linspace(0, T, num_steps, endpoint=False, dtype=dtype)
 
@@ -150,19 +175,23 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
                                   process_noise=process_noise,
                                   observation_noise=observation_noise)
         x = X0[np.random.choice(len(X0))]
-        x_rnn = torch.zeros((system.model.num_layers, 1,
-                             system.model.num_hidden), device=device)
         y = system.process.output(0, x, 0)
         episode_costs = []
-        action_means = []
+        logprobs = []
         for t in times:
-            x, y, u, u_numpy, c, x_rnn = system.step(t, x, y, x_rnn)
-            episode_costs.append(c)
-            action_means.append(u)
-            monitor.update_variables(t, states=x, outputs=y, control=u_numpy,
-                                     cost=c)
+            x, y, u, c, logprob = system.step(t, x, y)
+            episode_costs.append(-c)
+            logprobs.append(logprob)
+            monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
 
         running_cost = beta * np.sum(episode_costs) + (1 - beta) * running_cost
+        writer.add_scalar('Total episode reward', np.sum(episode_costs),
+                          episode)
+        writer.add_histogram('Weights/hidden', model.hidden1.weight, episode)
+        writer.add_histogram('Biases/hidden', model.hidden1.bias, episode)
+        writer.add_histogram('Weights/decoder', model.decoder.weight, episode)
+        writer.add_histogram('Biases/decoder', model.decoder.bias, episode)
+        writer.close()
 
         discounted_cost = 0
         expected_costs = []
@@ -173,18 +202,14 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
         expected_costs = expected_costs[::-1]
         expected_costs = torch.tensor(expected_costs, device=device,
                                       dtype=dtype_torch)
-        expected_costs = (expected_costs - expected_costs.mean()) \
-            / (torch.std(expected_costs) + epsilon)
+        expected_costs = (expected_costs - expected_costs.mean()) / (
+            torch.std(expected_costs) + epsilon)
 
         # Network outputs the means of a normal distribution that models
         # probability of continuous actions. Assume unit variance. Then
         # after applying the log, only the squared mean remains.
-        loss = expected_costs * torch.square(torch.tensor(action_means,
-                                                          device=device))
-
-        loss = loss.sum()
-
-        loss.requires_grad = True
+        loss = [-logprob * c for logprob, c in zip(logprobs, expected_costs)]
+        loss = torch.cat(loss).sum()
 
         optimizer.zero_grad()
 
@@ -195,9 +220,9 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
         training_costs.append(running_cost)
 
         if verbose:
-            print("\nEpisode {:3} ({:2.1f} s): Final loss of episode {:.3e}, "
+            print("\nEpisode {:3} ({:2.1f} s): Total loss of episode {:.3e}, "
                   "running loss {:.3e}.".format(episode, time.time() - tic,
-                                                episode_costs[-1],
+                                                np.sum(episode_costs),
                                                 running_cost))
         if running_cost < reward_threshold:
             print("Done training.")
@@ -242,7 +267,7 @@ def train_sweep(config):
 
 
 if __name__ == '__main__':
-    _config = configs.config_train_rnn_reinforce.get_config()
+    _config = configs.config_train_mlp_lqr_reinforce.get_config()
 
     apply_config(_config)
 

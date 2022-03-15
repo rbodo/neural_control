@@ -43,13 +43,14 @@ def plot_timeseries(df, path=None):
 
 
 def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
-                       start_points=None, n=10, xt=None, rng=None, path=None):
+                       start_points=None, n=10, xt=None, rng=None, path=None,
+                       show=True, xlim=None, ylim=None):
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
     labels = list(state_dict.keys())
     states = list(state_dict.values())
     i, j = (0, 1)  # np.argsort(labels))
 
-    plt.figure()
+    fig = plt.figure()
 
     # Draw trajectory.
     plt.plot(states[i], states[j])
@@ -92,9 +93,17 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
         plt.streamplot(grid[0], grid[1], dx[0], dx[1],
                        start_points=start_points, linewidth=0.3)
 
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
+
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
+
+    return fig
 
 
 def float2str(x):
@@ -226,7 +235,7 @@ def plot_kalman_gain_vs_noise_levels(process_noises, observation_noises,
                       [float2str(p) for p in process_noises],
                       [float2str(p) for p in observation_noises])
     g = sns.heatmap(df, annot=True, fmt='.2f', linewidths=.5, square=True,)
-                    # norm=LogNorm())
+    # norm=LogNorm())
     g.set_xlabel('Observation noise')
     g.set_ylabel('Process noise')
     if path is not None:

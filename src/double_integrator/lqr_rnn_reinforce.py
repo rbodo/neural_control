@@ -6,14 +6,17 @@ from itertools import product, count
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
+from torch.distributions import Normal
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-import torch.nn as nn
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DI
 from src.double_integrator.di_lqg import get_grid, jitter
-from src.double_integrator.di_rnn import add_variables
-from src.double_integrator.plotting import plot_training_curve, float2str
+from src.double_integrator.di_lqr import add_variables
+from src.double_integrator.plotting import plot_training_curve, float2str, \
+    plot_phase_diagram
 from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import apply_config, RNG, Monitor, \
     get_lqr_cost
@@ -31,11 +34,29 @@ class RNNModel(nn.Module):
 
         self.rnn = nn.RNN(input_size=num_inputs, hidden_size=num_hidden,
                           num_layers=num_layers, nonlinearity=activation)
+        turn_off_recurrence = False
+        if turn_off_recurrence:
+            self.rnn.weight_hh_l0.requires_grad = False
+            self.rnn.bias_hh_l0.requires_grad = False
+            self.rnn.weight_hh_l0 *= 0
+            self.rnn.bias_hh_l0 *= 0
         self.decoder = nn.Linear(num_hidden, num_outputs)
+        initialize_with_mlp = False
+        if initialize_with_mlp:
+            state_dict = torch.load('/home/bodrue/model.pth')
+            with torch.no_grad():
+                self.rnn.weight_ih_l0 = \
+                    torch.nn.Parameter(state_dict['hidden1.weight'])
+                self.rnn.bias_ih_l0 = \
+                    torch.nn.Parameter(state_dict['hidden1.bias'])
+                self.decoder.weight = \
+                    torch.nn.Parameter(state_dict['decoder.weight'])
+                self.decoder.bias = \
+                    torch.nn.Parameter(state_dict['decoder.bias'])
 
     def forward(self, x, *args):
         output, hidden = self.rnn(x, args[0])
-        decoded = torch.tanh(self.decoder(output))
+        decoded = self.decoder(output)
         return decoded, hidden
 
 
@@ -68,13 +89,19 @@ class RNN:
         return y.squeeze(), x
 
     def step(self, t, x, y, x_rnn):
-        u, x_rnn = self.get_control(x_rnn, y)
-        u_numpy = np.array(u.clone().detach().cpu(), self.dtype, ndmin=1)
-        x = self.process.step(t, x, u_numpy)
-        y = self.process.output(t, x, u_numpy)
-        c = self.get_cost(x, u_numpy)
+        out, x_rnn = self.get_control(x_rnn, y)
+        mean = torch.tanh(out[0])
+        var = max(1e-6, torch.sigmoid((out[1])))
+        m = Normal(mean, var)
+        u = m.sample()
+        logprob = torch.unsqueeze(m.log_prob(u), 0)
+        u = np.array(u.clone().detach().cpu(), self.dtype, ndmin=1)
+        x = self.process.step(t, x, u)
+        x[0] = np.clip(x[0], -1, 1)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
 
-        return x, y, u, u_numpy, c, x_rnn
+        return x, y, u, c, x_rnn, logprob
 
     def dynamics(self, t, x, u):
         x_rnn = np.zeros(self.model.num_hidden, self.dtype)
@@ -88,7 +115,7 @@ class DiRnn(RNN):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  model_kwargs: dict = None, gpu: int = 0, dtype='float32'):
         num_inputs = 1
-        num_outputs = 1
+        num_outputs = 2
         num_states = 2
         process = DI(num_inputs, num_outputs, num_states,
                      var_x, var_y, dt, rng)
@@ -112,17 +139,22 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     beta = 0.05
     epsilon = np.finfo(np.float32).eps.item()
     cost_discount = 0.99
-    reward_threshold = 1e-3
-    max_num_episodes = 10000
-    rnn_kwargs = {'num_inputs': 1,
+    reward_threshold = -1e-1
+    max_num_episodes = 1000
+    gpu = 2
+    torch.manual_seed(54)
+    writer = SummaryWriter(config.paths.PATH_BASE)
+
+    rnn_kwargs = {'num_inputs': 2,
                   'num_layers': config.model.NUM_LAYERS,
                   'num_hidden': config.model.NUM_HIDDEN,
+                  'num_outputs': 2,
                   'activation': config.model.ACTIVATION}
 
     # Create double integrator with RNN feedback.
     system = DiRnn(process_noise, observation_noise, dt, RNG,
                    config.controller.cost.lqr.Q, config.controller.cost.lqr.R,
-                   model_kwargs=rnn_kwargs, dtype=dtype)
+                   model_kwargs=rnn_kwargs, dtype=dtype, gpu=gpu)
 
     model = system.model
     device = system.device
@@ -133,6 +165,11 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
 
     # Initialize the state vectors at each jittered grid location.
     X0 = jitter(grid, Sigma0, RNG).astype(dtype)
+
+    writer.add_graph(model, [
+        torch.from_numpy(np.expand_dims(X0[0], [0, 1])).to(device),
+        torch.from_numpy(np.zeros((model.num_layers, 1, model.num_hidden),
+                                  dtype)).to(device)])
 
     times = np.linspace(0, T, num_steps, endpoint=False, dtype=dtype)
 
@@ -149,20 +186,23 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
         monitor.update_parameters(experiment=episode,
                                   process_noise=process_noise,
                                   observation_noise=observation_noise)
+        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
+        x_rnn = torch.zeros(model.num_layers, 1, model.num_hidden,
+                            dtype=dtype_torch, device=device)
+        # x = [1, -0.1]
         x = X0[np.random.choice(len(X0))]
-        x_rnn = torch.zeros((system.model.num_layers, 1,
-                             system.model.num_hidden), device=device)
         y = system.process.output(0, x, 0)
         episode_costs = []
-        action_means = []
+        logprobs = []
         for t in times:
-            x, y, u, u_numpy, c, x_rnn = system.step(t, x, y, x_rnn)
-            episode_costs.append(c)
-            action_means.append(u)
-            monitor.update_variables(t, states=x, outputs=y, control=u_numpy,
-                                     cost=c)
+            x, y, u, c, x_rnn, logprob = system.step(t, x, y, x_rnn)
+            episode_costs.append(-c)
+            logprobs.append(logprob)
+            monitor.update_variables(t, states=x, outputs=y, control=u, cost=c)
 
         running_cost = beta * np.sum(episode_costs) + (1 - beta) * running_cost
+        writer.add_scalar('Total episode reward', np.sum(episode_costs),
+                          episode)
 
         discounted_cost = 0
         expected_costs = []
@@ -173,18 +213,14 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
         expected_costs = expected_costs[::-1]
         expected_costs = torch.tensor(expected_costs, device=device,
                                       dtype=dtype_torch)
-        expected_costs = (expected_costs - expected_costs.mean()) \
-            / (torch.std(expected_costs) + epsilon)
+        expected_costs = (expected_costs - expected_costs.mean()) / (
+            torch.std(expected_costs) + epsilon)
 
         # Network outputs the means of a normal distribution that models
         # probability of continuous actions. Assume unit variance. Then
         # after applying the log, only the squared mean remains.
-        loss = expected_costs * torch.square(torch.tensor(action_means,
-                                                          device=device))
-
-        loss = loss.sum()
-
-        loss.requires_grad = True
+        loss = [-logprob * c for logprob, c in zip(logprobs, expected_costs)]
+        loss = torch.cat(loss).sum()
 
         optimizer.zero_grad()
 
@@ -195,13 +231,31 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
         training_costs.append(running_cost)
 
         if verbose:
-            print("\nEpisode {:3} ({:2.1f} s): Final loss of episode {:.3e}, "
-                  "running loss {:.3e}.".format(episode, time.time() - tic,
-                                                episode_costs[-1],
+            print("\nEpisode {:3} ({:2.1f} s): Total loss of episode {:.3f}, "
+                  "running loss {:.3f}.".format(episode, time.time() - tic,
+                                                np.sum(episode_costs),
                                                 running_cost))
-        if running_cost < reward_threshold:
+        if running_cost > reward_threshold:
             print("Done training.")
             break
+
+        if episode % 10 == 0:
+            writer.add_histogram('Weights/hidden_hh', model.rnn.weight_hh_l0,
+                                 episode)
+            writer.add_histogram('Biases/hidden_hh', model.rnn.bias_hh_l0,
+                                 episode)
+            writer.add_histogram('Weights/hidden_ih', model.rnn.weight_ih_l0,
+                                 episode)
+            writer.add_histogram('Biases/hidden_ih', model.rnn.bias_ih_l0,
+                                 episode)
+            writer.add_histogram('Weights/decoder', model.decoder.weight,
+                                 episode)
+            writer.add_histogram('Biases/decoder', model.decoder.bias, episode)
+            fig = plot_phase_diagram(monitor.get_last_trajectory(), show=False,
+                                     xt=config.controller.STATE_TARGET,
+                                     xlim=[-1.1, 1.1], ylim=[-1.1, 1.1])
+            writer.add_figure('Trajectory', fig, episode)
+            writer.close()
 
     if plot_loss:
         path_figures = config.paths.PATH_FIGURES
@@ -242,7 +296,7 @@ def train_sweep(config):
 
 
 if __name__ == '__main__':
-    _config = configs.config_train_rnn_reinforce.get_config()
+    _config = configs.config_train_rnn_lqr_reinforce.get_config()
 
     apply_config(_config)
 
