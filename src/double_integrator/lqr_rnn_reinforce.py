@@ -25,15 +25,20 @@ from src.double_integrator.utils import apply_config, RNG, Monitor, \
 class RNNModel(nn.Module):
 
     def __init__(self, num_inputs=1, num_hidden=1, num_layers=1, num_outputs=1,
-                 activation='relu'):
+                 activation='relu', neuron_model='rnn'):
 
         super().__init__()
 
         self.num_hidden = num_hidden
         self.num_layers = num_layers
 
-        self.rnn = nn.RNN(input_size=num_inputs, hidden_size=num_hidden,
-                          num_layers=num_layers, nonlinearity=activation)
+        if neuron_model == 'gru':
+            self.rnn = nn.GRU(input_size=num_inputs, hidden_size=num_hidden,
+                              num_layers=num_layers)
+        else:
+            self.rnn = nn.RNN(input_size=num_inputs, hidden_size=num_hidden,
+                              num_layers=num_layers, nonlinearity=activation)
+
         turn_off_recurrence = False
         if turn_off_recurrence:
             self.rnn.weight_hh_l0.requires_grad = False
@@ -62,11 +67,12 @@ class RNNModel(nn.Module):
 
 class RNN:
     def __init__(self, process, q=0.5, r=0.5, model_kwargs: dict = None,
-                 gpu: int = 0, dtype='float32'):
+                 gpu: int = None, dtype='float32'):
 
         self.process = process
         self.dtype = dtype
-        torch.set_default_dtype(getattr(torch, dtype))
+        self.dtype_torch = getattr(torch, dtype)
+        torch.set_default_dtype(self.dtype_torch)
 
         # State cost matrix:
         self.Q = q * np.eye(self.process.num_states, dtype=dtype)
@@ -75,7 +81,10 @@ class RNN:
         self.R = r * np.eye(self.process.num_inputs, dtype=dtype)
 
         self.model = RNNModel(**model_kwargs)
-        self.device = torch.device(f'cuda:{gpu}')
+        if gpu is None:
+            self.device = torch.device('cpu')
+        else:
+            self.device = torch.device(f'cuda:{gpu}')
         self.model.to(self.device)
 
     def get_cost(self, x, u):
@@ -84,14 +93,20 @@ class RNN:
     def get_control(self, x, u):
         # Add dummy dimensions for shape [num_timesteps, batch_size,
         # num_states].
-        u = torch.from_numpy(np.expand_dims(u, [0, 1])).to(self.device)
+        u = torch.tensor(np.expand_dims(u, [0, 1]), device=self.device)
         y, x = self.model(u, x)
         return y.squeeze(), x
 
     def step(self, t, x, y, x_rnn):
         out, x_rnn = self.get_control(x_rnn, y)
         mean = torch.tanh(out[0])
-        var = max(1e-6, torch.sigmoid((out[1])))
+        var = torch.sigmoid(out[1])
+        if torch.isnan(mean):
+            mean = torch.tensor(1, dtype=self.dtype_torch, device=self.device,
+                                requires_grad=True)
+        if torch.isnan(var) or var < 1e-6:
+            var = torch.tensor(1e-6, dtype=self.dtype_torch,
+                               device=self.device, requires_grad=True)
         m = Normal(mean, var)
         u = m.sample()
         logprob = torch.unsqueeze(m.log_prob(u), 0)
@@ -113,7 +128,7 @@ class RNN:
 
 class DiRnn(RNN):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 model_kwargs: dict = None, gpu: int = 0, dtype='float32'):
+                 model_kwargs: dict = None, gpu: int = None, dtype='float32'):
         num_inputs = 1
         num_outputs = 2
         num_states = 2
@@ -141,9 +156,13 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     cost_discount = 0.99
     reward_threshold = -1e-1
     max_num_episodes = 1000
-    gpu = 2
+    gpu = 4
+    if gpu is not None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = f'{gpu}'
+        gpu = 0  # Need to set relative ID
+    torch.set_num_threads(1)
     torch.manual_seed(54)
-    writer = SummaryWriter(config.paths.PATH_BASE)
+    writer = SummaryWriter(os.path.join(config.paths.PATH_BASE, 'tensorboard'))
 
     rnn_kwargs = {'num_inputs': 2,
                   'num_layers': config.model.NUM_LAYERS,
@@ -167,9 +186,9 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     X0 = jitter(grid, Sigma0, RNG).astype(dtype)
 
     writer.add_graph(model, [
-        torch.from_numpy(np.expand_dims(X0[0], [0, 1])).to(device),
-        torch.from_numpy(np.zeros((model.num_layers, 1, model.num_hidden),
-                                  dtype)).to(device)])
+        torch.tensor(np.expand_dims(X0[0], [0, 1]), device=device),
+        torch.tensor(np.zeros((model.num_layers, 1, model.num_hidden), dtype),
+                     device=device)])
 
     times = np.linspace(0, T, num_steps, endpoint=False, dtype=dtype)
 
@@ -188,7 +207,8 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
                                   observation_noise=observation_noise)
         # Add dummy dimensions for shape [num_layers, batch_size, num_states].
         x_rnn = torch.zeros(model.num_layers, 1, model.num_hidden,
-                            dtype=dtype_torch, device=device)
+                            dtype=dtype_torch, device=device,
+                            requires_grad=True)
         # x = [1, -0.1]
         x = X0[np.random.choice(len(X0))]
         y = system.process.output(0, x, 0)

@@ -135,7 +135,7 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     max_num_episodes = 10000
     gpu = 2
     torch.manual_seed(54)
-    writer = SummaryWriter(config.paths.PATH_BASE)
+    writer = SummaryWriter(os.path.join(config.paths.PATH_BASE, 'tensorboard'))
 
     model_kwargs = {'num_inputs': 2,
                     'num_hidden': config.model.NUM_HIDDEN,
