@@ -11,7 +11,7 @@ def get_config(timestamp_workdir=None, base_path=None):
 
     if base_path is None:
         base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
-                    'reinforce/lqg_single_config'
+                    'reinforce/lqg'
     base_path = apply_timestamp(base_path, timestamp_workdir)
 
     config.paths.PATH_BASE = base_path
@@ -25,14 +25,12 @@ def get_config(timestamp_workdir=None, base_path=None):
     config.simulation.NUM_STEPS = 1000
     config.simulation.GRID_SIZE = 100
 
-    config.model.NUM_HIDDEN = 50
-    config.model.NEURON_MODEL = 'rnn'
+    config.model.NUM_HIDDEN = 128
 
     config.training.BATCH_SIZE = 1
     config.training.OPTIMIZER = 'adam'
-    config.training.LEARNING_RATE = 5e-4
-    config.training.NUM_EPOCHS = 5000
-    config.training.REWARD_DISCOUNT = 0.65
+    config.training.LEARNING_RATE = 1e-3
+    config.training.NUM_EPOCHS = 500
 
     config.process.PROCESS_NOISES = config2.process.PROCESS_NOISES[:1]
     config.process.OBSERVATION_NOISES = config2.process.OBSERVATION_NOISES[:1]

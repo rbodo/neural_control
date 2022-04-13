@@ -1,15 +1,10 @@
 import os
 import sys
 import time
-from itertools import product
 
-import logging
 import numpy as np
-import pandas as pd
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
-import optuna
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DI
@@ -18,51 +13,31 @@ from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.lqr_rnn_reinforce import RNN
 from src.double_integrator.plotting import plot_training_curve, float2str, \
     plot_phase_diagram
-from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import apply_config, Monitor
 
 
-def objective(trial: optuna.Trial):
-    dt = 0.1
+def objective_single(base_path):
 
     max_rewards = []
-    seeds = [42, 52, 103]
+    rng = np.random.default_rng(seed=42)
+    seeds = (rng.random(10) * 10000)
     for seed in seeds:
-        config = configs.config_train_rnn_lqg_reinforce.get_config()
+        config = \
+            configs.config_train_rnn_lqg_reinforce.get_config(
+                base_path=base_path)
 
         config.defrost()
 
-        num_layers = 1  # trial.suggest_int('num_layers', 1, 2)
-        num_hidden = trial.suggest_int('num_hidden', 2, 64, log=True)
-        activation = trial.suggest_categorical('activation', ['tanh', 'relu'])
-        neuron_model = trial.suggest_categorical('neuron_model',
-                                                 ['rnn', 'gru'])
-        learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-1,
-                                            log=True)
-        num_steps = trial.suggest_int('num_steps', 100, 10000, log=True)
-        reward_discount = trial.suggest_float('reward_discount', 0.6, 1,
-                                              log=True)
-
-        config.model.NUM_LAYERS = num_layers
-        config.model.NUM_HIDDEN = num_hidden
-        config.model.ACTIVATION = activation
-        config.model.NEURON_MODEL = neuron_model
-        config.training.LEARNING_RATE = learning_rate
-        config.simulation.NUM_STEPS = num_steps
-        config.training.REWARD_DISCOUNT = reward_discount
-        config.simulation.T = num_steps * dt
-
-        config.SEED = seed
+        config.SEED = int(seed)
 
         apply_config(config)
 
         rewards = train_single(config, verbose=True, plot_loss=False,
                                save_model=False)
+
         max_rewards.append(np.max(rewards))
 
-        config.defrost()
-
-    return np.mean(max_rewards)
+    return max_rewards
 
 
 class DiRnn(RNN):
@@ -247,55 +222,11 @@ def train_single(config, verbose=True, plot_loss=True, save_model=True):
     return training_rewards
 
 
-def train_sweep(config):
-    path, filename = os.path.split(config.paths.FILEPATH_MODEL)
-    process_noises = config.process.PROCESS_NOISES
-    observation_noises = config.process.OBSERVATION_NOISES
-
-    dfs = []
-    config.defrost()
-    for w, v in tqdm(product(process_noises, observation_noises), leave=False):
-        path_model = os.path.join(path, get_model_name(filename, w, v))
-        config.paths.FILEPATH_MODEL = path_model
-        config.process.PROCESS_NOISES = [w]
-        config.process.OBSERVATION_NOISES = [v]
-
-        t_loss, v_loss = train_single(config, verbose=True)
-
-        dfs.append(pd.DataFrame({'process_noise': w,
-                                 'observation_noise': v,
-                                 'training_loss': t_loss,
-                                 'validation_loss': v_loss}))
-
-    df = pd.concat(dfs, ignore_index=True)
-    df.to_pickle(config.paths.FILEPATH_OUTPUT_DATA)
-
-
 if __name__ == '__main__':
-    optuna.logging.get_logger('optuna').addHandler(
-        logging.StreamHandler(sys.stdout))
+    basepath = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
+               'reinforce/lqg_single_config'
+    results = objective_single(basepath)
 
-    base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
-                'reinforce/lqg'
-    study_name = 'rnn_lqg_reinforce'
-    filepath_output = os.path.join(base_path, study_name + '.db')
-    storage_name = f'sqlite:///{filepath_output}'
-    study = optuna.create_study(storage_name, study_name=study_name,
-                                direction='maximize', load_if_exists=True)
-
-    # objective(study.trials[11])
-    study.optimize(objective, n_trials=10000, timeout=None,
-                   show_progress_bar=True)
-
-    print("Number of finished trials: ", len(study.trials))
-
-    print("Best trial:")
-    best_trial = study.best_trial
-
-    print("  Value: ", best_trial.value)
-
-    print("  Params: ")
-    for key, value in best_trial.params.items():
-        print("    {}: {}".format(key, value))
+    print(results)
 
     sys.exit()

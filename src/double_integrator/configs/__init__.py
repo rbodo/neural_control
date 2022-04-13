@@ -23,6 +23,7 @@ from src.double_integrator.configs import (
     config_train_mlp_lqr_reinforce,
     config_train_rnn_lqr_reinforce,
     config_train_rnn_lqg_reinforce,
+    config_train_rnn_lqg_reinforce_hyperparameter,
     config_train_rnn_all_noises,
     config_train_rnn_gramian_high_noise,
     config_train_rnn_gramian_low_noise,
