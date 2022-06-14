@@ -459,8 +459,8 @@ class DiRnn(RNN):
 
 class DiPidRnn(PidRnn):
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs: dict=None, gpu=0, k_p=1, k_i=1,
-                 k_d=1):
+                 path_model=None, model_kwargs: dict = None, gpu=0, k_p=1,
+                 k_i=1, k_d=1):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
