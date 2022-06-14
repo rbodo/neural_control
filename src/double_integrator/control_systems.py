@@ -4,6 +4,7 @@ import numpy as np
 
 from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
                                          get_additive_white_gaussian_noise)
+from src.ff_pid.pid import PID
 
 
 class LQR:
@@ -204,6 +205,73 @@ class RNN:
         return self.process.dynamics(t, x, u)
 
 
+class PidRnn:
+    def __init__(self, process, q=0.5, r=0.5, path_model=None,
+                 model_kwargs: dict = None, gpu=0, k_p=1, k_i=1, k_d=1,
+                 dtype='float32'):
+
+        self.process = process
+        self.dtype = dtype
+
+        # State cost matrix:
+        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
+
+        # Control cost matrix:
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
+
+        self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
+        self.model_kwargs = model_kwargs
+        self.path_model = path_model
+        self.model = self.get_model()
+        self.model_setpoint = self.get_model()
+        self.pid = PID(k_p=k_p, k_i=k_i, k_d=k_d)
+
+    def get_model(self):
+        model = RNNModel(**self.model_kwargs)
+        model.hybridize()
+        if self.path_model is None:
+            model.initialize(ctx=self.context)
+        else:
+            model.load_parameters(self.path_model, ctx=self.context)
+        return model
+
+    def get_cost(self, x, u):
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
+
+    def get_control(self, x_perturbed, x_setpoint, u, t):
+        u_perturbed, x_rnn_perturbed = \
+            self._forward(x_perturbed, u, self.model)
+        u_setpoint, x_rnn_setpoint = \
+            self._forward(x_setpoint, u, self.model_setpoint)
+        u = self.pid.update(u_perturbed, u_setpoint, t)
+        return u_perturbed + u, x_rnn_perturbed, x_rnn_setpoint
+
+    def _forward(self, x, u, model):
+        # Add dummy dimensions for shape [num_timesteps, batch_size,
+        # num_states].
+        u = mx.nd.array(np.expand_dims(u, [0, 1]), self.context)
+        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
+        x = mx.nd.array(np.reshape(x, (-1, 1, model.num_hidden)), self.context)
+        y, x = model(u, x)
+        return y.asnumpy().ravel(), x[0].asnumpy().ravel()
+
+    def step(self, t, x, y, x_rnn_perturbed, x_rnn_setpoint):
+        u, x_rnn_perturbed, x_rnn_setpoint = self.get_control(
+            x_rnn_perturbed, x_rnn_setpoint, y, t)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
+
+        return x, y, u, c, x_rnn_perturbed, x_rnn_setpoint
+
+    def dynamics(self, t, x, u):
+        x_rnn = np.zeros(self.model.num_hidden, self.dtype)
+        y = self.process.output(t, x, u)
+        u, _, _ = self.get_control(x_rnn, x_rnn.copy(), y, t)
+
+        return self.process.dynamics(t, x, u)
+
+
 class LqeMlp:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
                  model_kwargs=None):
@@ -387,6 +455,19 @@ class DiRnn(RNN):
         process = DI(num_inputs, num_outputs, num_states,
                      var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs, gpu)
+
+
+class DiPidRnn(PidRnn):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 path_model=None, model_kwargs: dict=None, gpu=0, k_p=1, k_i=1,
+                 k_d=1):
+        num_inputs = 1
+        num_outputs = 1
+        num_states = 2
+        process = DI(num_inputs, num_outputs, num_states,
+                     var_x, var_y, dt, rng)
+        super().__init__(process, q, r, path_model, model_kwargs, gpu, k_p,
+                         k_i, k_d)
 
 
 class DiLqeRnn(LqeRnn):

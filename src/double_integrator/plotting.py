@@ -146,6 +146,49 @@ def plot_cost_vs_noise(df, path=None):
     plt.show()
 
 
+def plot_cost_vs_noise_control(df, path=None):
+    # col_wrap = int(np.sqrt(df['perturbation_level'].nunique()))
+    col_wrap = df['perturbation_level'].nunique()
+    g = sns.relplot(data=df, x='times', y='c', col='perturbation_level',
+                    style='control_mode', col_wrap=col_wrap, kind='line',
+                    palette=sns.color_palette('coolwarm', as_cmap=True))
+    g.set(yscale='log')
+    g.set_titles("Perturbation level: {col_name:.2}")
+    g.set_axis_labels('Time', 'Cost')
+    g.legend.set_title('Controller')
+
+    format_legend(g.legend)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
+def plot_trajectories_vs_noise_control(df, path=None, xlim=None, ylim=None):
+    df = df[df['experiment'] == 0]
+    # col_wrap = int(np.sqrt(df['perturbation_level'].nunique()))
+    col_wrap = df['perturbation_level'].nunique()
+    g = sns.relplot(data=df, x='x', y='v', col='perturbation_level',
+                    style='control_mode', col_wrap=col_wrap, kind='line',
+                    palette=sns.color_palette('coolwarm', as_cmap=True),
+                    hue_norm=LogNorm(), alpha=0.5)
+    g.set_titles("Perturbation level: {col_name:.2}")
+    g.legend.set_title('Controller')
+    format_legend(g.legend)
+
+    for ax in g.axes:
+        ax.plot(0, 0, 'kx')
+
+    if xlim is not None:
+        plt.xlim(xlim)
+        if ylim is not None:
+            plt.ylim(ylim)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
 def plot_cost_vs_time(df, path=None):
     # df = df.loc[df['observation_noise'] != df['observation_noise'].max()]
     g = sns.lineplot(data=df, x='times', y='c', style='controller',

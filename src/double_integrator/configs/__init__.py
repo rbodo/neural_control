@@ -2,6 +2,7 @@ from src.double_integrator.configs import (
     config,
     config_collect_ood_data,
     config_collect_training_data,
+    config_di_rnn_pid,
     config_hyperparameter_rnn_high_noise,
     config_hyperparameter_rnn_low_noise,
     config_lqg,
