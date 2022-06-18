@@ -7,8 +7,8 @@ from gym import spaces
 from gym.utils.env_checker import check_env
 from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
+# from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.evaluation import evaluate_policy
 from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.logger import Figure
 
@@ -44,7 +44,7 @@ class DoubleIntegrator(gym.Env):
 
         # State cost matrix:
         self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-        self.Q[0, 0] *= 10#
+        # self.Q[0, 0] *= 10#
 
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
@@ -59,6 +59,7 @@ class DoubleIntegrator(gym.Env):
     def step(self, action):
 
         self.states = self.process.step(self.t, self.states, action)
+        np.clip(self.states, self.min, self.max, self.states)
 
         self.cost = self.get_cost(self.states, action)
 
@@ -91,62 +92,128 @@ class DoubleIntegrator(gym.Env):
         print("States: ", self.states, "\tCost: ", self.cost)
 
 
-class FigureRecorderCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super(FigureRecorderCallback, self).__init__(verbose)
+def get_states(model, i_step, num_steps=1):
+    k, r = divmod(i_step, num_steps)
+    if r == 0:
+        return model.replay_buffer.observations[num_steps * (k - 1):
+                                                num_steps * k]
 
-    def _on_rollout_end(self):
-        figure = plt.figure()
-        figure.add_subplot().plot(np.random.random(3))
-        # Close the figure after logging it
-        self.logger.record("trajectory/figure", Figure(figure, close=True),
-                           exclude=("stdout", "log", "json", "csv"))
-        plt.close()
+
+def plot_trajectory(states, path=None, show=False):
+    plt.plot(states[:, 0, 0], states[:, 0, 1])
+    plt.plot(0, 0, 'kx')
+    plt.xlim(-1, 1)
+    plt.ylim(-1, 1)
+    plt.xlabel('x')
+    plt.ylabel('v')
+    if show:
+        plt.show()
+    if path is not None:
+        plt.savefig(path)
+    return plt.gcf()
+
+
+class FigureRecorderTrain(BaseCallback):
+    def _on_step(self) -> bool:
         return True
 
+    def _on_rollout_end(self):
+        if hasattr(self.model, 'rollout_buffer'):
+            states = self.model.rollout_buffer.observations
+        else:
+            states = get_states(self.model, self.n_calls, 1000)
+            if states is None:
+                return
+        figure = plot_trajectory(states)
+        self.logger.record("trajectory/train", Figure(figure, close=True),
+                           exclude=("stdout", "log", "json", "csv"))
+        plt.close()
 
-def test(env, model):
-    obs = env.reset()
+
+class FigureRecorderTest(BaseCallback):
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self):
+        if hasattr(self.model, 'replay_buffer') and self.n_calls % 1000 > 0:
+            return
+        states = eval_rnn(self.locals['env'].envs[0], self.model)
+        figure = plot_trajectory(states)
+        self.logger.record("trajectory/eval", Figure(figure, close=True),
+                           exclude=("stdout", "log", "json", "csv"))
+        plt.close()
+
+
+def eval_rnn(env, model):
+    x = env.reset()
     # cell and hidden state of the LSTM
     lstm_states = None
     num_envs = 1
     # Episode start signals are used to reset the lstm states
     episode_starts = np.ones((num_envs,), dtype=bool)
+    states = []
     while True:
-        action, lstm_states = model.predict(obs, state=lstm_states,
-                                            episode_start=episode_starts,
-                                            deterministic=True)
-        obs, rewards, dones, info = env.step(action)
-        episode_starts = dones
-        env.render('console')
+        u, lstm_states = model.predict(x, state=lstm_states,
+                                       episode_start=episode_starts,
+                                       deterministic=True)
+        x, reward, done, info = env.step(u)
+        episode_starts = done
+        states.append(env.states)
+        if done:
+            env.reset()
+            break
+    print(f"Final reward: {reward}")
+    return np.expand_dims(states, 1)
 
 
-def main():
-    gpu = 3
+def eval_mlp(env, model):
+    x = env.reset()
+    states = []
+    while True:
+        u, _ = model.predict(x, deterministic=True)
+        x, reward, done, info = env.step(u)
+        states.append(env.states)
+        if done:
+            env.reset()
+            break
+    print(f"Final reward: {reward}")
+    return np.array(states)
+
+
+def main(save_model_to=None, load_model_from=None):
+    gpu = 2
     os.environ['CUDA_VISIBLE_DEVICES'] = f'{gpu}'
 
-    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, q=1, r=0.01)#
-    env = TimeLimit(env, 500)
+    num_steps = 500
+    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1)
+    # env = DoubleIntegrator(q=1, r=0.01)
+    env = TimeLimit(env, num_steps)
     check_env(env)
 
-    log_dir = '/home/bodrue/Data/neural_control/double_integrator/rnn_pid/' \
-              'tensorboard_log'
+    log_dir = os.path.join(_path, 'tensorboard_log')
     model = RecurrentPPO('MlpLstmPolicy', env, verbose=1, device='cuda',
                          tensorboard_log=log_dir)
+    # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
+    #             tensorboard_log=log_dir)
+    if load_model_from is None:
+        model.learn(int(2e5), callback=[  # FigureRecorderTrain(),
+                                        FigureRecorderTest()])
+        if save_model_to is not None:
+            model.save(save_model_to)
+    else:
+        model = model.load(load_model_from)
 
-    model.learn(int(1e5), callback=FigureRecorderCallback())
-
-    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=20,
-                                              warn=False)
-    print(mean_reward)
-
-    model.save("ppo_recurrent")
-
-    test(env, model)
+    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=20,
+    #                                           warn=False)
+    # print(mean_reward)
+    states = eval_rnn(env, model)
+    plot_trajectory(states, path_figure)
 
 
 if __name__ == '__main__':
-
-    main()
+    _path = '/home/bodrue/Data/neural_control/double_integrator/rnn_pid'
+    path_model = os.path.join(_path, 'models', 'lqg_rnn_ppo')
+    path_figure = os.path.join(_path, 'figures', 'lqg_rnn_ppo_trajectory.png')
+    main(save_model_to=path_model)
 
     sys.exit()
