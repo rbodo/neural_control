@@ -8,10 +8,12 @@ from src.ff_pid.pid import PID
 
 
 class LQR:
-    def __init__(self, process, q=0.5, r=0.5, dtype='float32'):
+    def __init__(self, process, q=0.5, r=0.5, dtype='float32',
+                 normalize_cost=False):
 
         self.process = process
         self.dtype = dtype
+        self.normalize_cost = normalize_cost
 
         # State cost matrix:
         self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
@@ -29,7 +31,8 @@ class LQR:
         return K
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
+                            normalize=self.normalize_cost)
 
     def get_control(self, x):
         return -self.K.dot(x)
@@ -88,10 +91,10 @@ class LQE:
 
 
 class LQG:
-    def __init__(self, process, q=0.5, r=0.5):
+    def __init__(self, process, q=0.5, r=0.5, normalize_cost=False):
         self.process = process
         self.estimator = LQE(self.process)
-        self.control = LQR(self.process, q, r)
+        self.control = LQR(self.process, q, r, normalize_cost=normalize_cost)
 
     def step(self, t, x, x_est, Sigma):
         u = self.control.get_control(x_est)
@@ -415,13 +418,14 @@ class DiLqr(LQR):
 
 
 class DiLqg(LQG):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
+    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
+                 normalize_cost=False):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
         process = DI(num_inputs, num_outputs, num_states,
                      var_x, var_y, dt, rng)
-        super().__init__(process, q, r)
+        super().__init__(process, q, r, normalize_cost)
 
 
 class DiMlp(MLP):
