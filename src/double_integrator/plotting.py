@@ -116,10 +116,29 @@ def plot_trajectories_vs_noise(df, path=None):
     g = sns.relplot(data=df, x='x', y='v', col='process_noise',
                     hue='observation_noise', col_wrap=col_wrap, kind='line',
                     palette=sns.color_palette('coolwarm', as_cmap=True),
-                    hue_norm=LogNorm(), alpha=0.5)
+                    hue_norm=LogNorm(), alpha=0.5, sort=False)
     g.set_titles("Process noise: {col_name:.2}")
     g.legend.set_title('Observation noise')
     format_legend(g.legend)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
+def plot_trajectories(df, path=None):
+    idxs = np.random.choice(df['experiment'], 9, replace=False)
+    df = df[[i in idxs for i in df['experiment']]]
+    g = sns.relplot(data=df, x='x', y='v', col='experiment', col_wrap=3,
+                    kind='line', alpha=0.5, style='controller',
+                    hue='controller', sort=False)
+    for ax in g.axes:
+        ax.plot(0, 0, 'kx')
+
+    plt.xlim(-1, 1)
+    plt.ylim(-1, 1)
+    g.set_titles('')
+    g.set_axis_labels('x', 'v')
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -140,6 +159,17 @@ def plot_cost_vs_noise(df, path=None):
         g.legend.set_title('Observation noise')
 
     format_legend(g.legend)
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    plt.show()
+
+
+def plot_cost(df, path=None):
+    g = sns.relplot(data=df, x='times', y='c', style='controller',
+                    kind='line', hue='controller')
+    g.set(yscale='log')
+    g.set_axis_labels('Time', 'Cost')
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -171,7 +201,7 @@ def plot_trajectories_vs_noise_control(df, path=None, xlim=None, ylim=None):
     g = sns.relplot(data=df, x='x', y='v', col='perturbation_level',
                     style='control_mode', col_wrap=col_wrap, kind='line',
                     palette=sns.color_palette('coolwarm', as_cmap=True),
-                    hue_norm=LogNorm(), alpha=0.5)
+                    hue_norm=LogNorm(), alpha=0.5, sort=False)
     g.set_titles("Perturbation level: {col_name:.2}")
     g.legend.set_title('Controller')
     format_legend(g.legend)

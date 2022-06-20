@@ -44,8 +44,8 @@ def run_single(system, times, monitor, inits):
                                  state_estimates=x_est)
 
 
-def get_grid(n):
-    x1_min, x1_max = -1, 1
+def get_grid(n, x_max=1):
+    x1_min, x1_max = -x_max, x_max
     x0_min, x0_max = -0.2, 0.2
     grid = np.mgrid[x0_min:x0_max:complex(0, n), x1_min:x1_max:complex(0, n)]
     grid = grid[::-1]

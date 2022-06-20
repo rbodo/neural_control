@@ -7,6 +7,7 @@ from src.double_integrator.configs import (
     config_hyperparameter_rnn_low_noise,
     config_lqg,
     config_lqg_generalization,
+    config_lqg_vs_ppo,
     config_lqr,
     config_mlp,
     config_mlp_lqe,
@@ -30,4 +31,3 @@ from src.double_integrator.configs import (
     config_train_rnn_gramian_low_noise,
     config_train_rnn_small,
 )
-

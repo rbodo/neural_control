@@ -160,7 +160,7 @@ def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky',
                np.outer(rng.standard_normal(size, dtype), np.diagonal(cov))
     else:
         return np.expand_dims(mean, 0) + \
-               np.expand_dims(rng.standard_normal(size,dtype), -1) * \
+               np.expand_dims(rng.standard_normal(size, dtype), -1) * \
                np.diagonal(cov)
 
 
@@ -176,11 +176,15 @@ def get_initial_states(mean, cov, num_states, n=1, rng=None, dtype='float32'):
     return get_gaussian_noise(mean, cov, n, rng)
 
 
-def get_lqr_cost(x, u, Q, R, dt=1, sign=1):
+def get_lqr_cost(x, u, Q, R, dt=1, sign=1, normalize=False):
     """Compute cost of an LQR system."""
 
-    return np.float32(sign) * dt * (np.dot(x, np.dot(Q, x)) +
-                                    np.dot(u, np.dot(R, u)))
+    c = np.float32(sign) * dt * (np.dot(x, np.dot(Q, x)) +
+                                 np.dot(u, np.dot(R, u)))
+    if normalize:
+        # Assumes Q, R diagonal.
+        c /= np.sqrt(np.trace(np.square(Q)) + np.trace(np.square(R)))
+    return c
 
 
 def get_lqr_cost_vectorized(x, u, Q, R, dt=1, sign=1):
