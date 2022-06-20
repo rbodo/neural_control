@@ -1,16 +1,21 @@
+import gc
+import logging
 import sys
 import os
 
 import numpy as np
 import gym
+import optuna
 from gym import spaces
-from gym.utils.env_checker import check_env
 from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
 # from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import RecurrentPPO
+from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import Figure
+from tqdm import trange
+from typing import Union
 
 from src.double_integrator.control_systems import DI
 from src.double_integrator.utils import get_lqr_cost
@@ -22,8 +27,8 @@ class DoubleIntegrator(gym.Env):
     metadata = {'render.modes': ['console']}
 
     def __init__(self, var_x=0., var_y=0., dt=0.1, rng=None,
-                 cost_threshold=1e-3, state_threshold=None, q=0.5, r=0.5,
-                 dtype=np.float32):
+                 cost_threshold=1e-3, state_threshold=None,
+                 q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32):
         super().__init__()
         self.dtype = dtype
         num_inputs = 1
@@ -34,7 +39,7 @@ class DoubleIntegrator(gym.Env):
 
         self.min = -1
         self.max = 1
-        self.action_space = spaces.Box(-1, 1, (1,), self.dtype)
+        self.action_space = spaces.Box(-10, 10, (1,), self.dtype)
         self.observation_space = spaces.Box(self.min, self.max, (num_outputs,),
                                             self.dtype)
         self.init_state_space = spaces.Box(self.min / 2, self.max / 2,
@@ -43,8 +48,10 @@ class DoubleIntegrator(gym.Env):
         self.state_threshold = state_threshold or self.max
 
         # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-        # self.Q[0, 0] *= 10#
+        if np.isscalar(q):
+            self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
+        else:
+            self.Q = np.diag(q)
 
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
@@ -54,7 +61,8 @@ class DoubleIntegrator(gym.Env):
         self.t = None
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt).item()
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
+                            normalize=True).item()
 
     def step(self, action):
 
@@ -75,9 +83,10 @@ class DoubleIntegrator(gym.Env):
 
         return observation, reward, done, {}
 
-    def reset(self):
+    def reset(self, state_init=None):
 
-        self.states = self.init_state_space.sample()
+        self.states = self.init_state_space.sample() if state_init is None\
+            else state_init
         action = 0
 
         self.cost = self.get_cost(self.states, action)
@@ -144,8 +153,12 @@ class FigureRecorderTest(BaseCallback):
         plt.close()
 
 
-def eval_rnn(env, model):
-    x = env.reset()
+def eval_rnn(env, model, x0=None, monitor=None):
+    t = 0
+    y = env.reset(state_init=x0)
+    x = env.states
+    reward = None
+
     # cell and hidden state of the LSTM
     lstm_states = None
     num_envs = 1
@@ -153,16 +166,24 @@ def eval_rnn(env, model):
     episode_starts = np.ones((num_envs,), dtype=bool)
     states = []
     while True:
-        u, lstm_states = model.predict(x, state=lstm_states,
+        u, lstm_states = model.predict(y, state=lstm_states,
                                        episode_start=episode_starts,
                                        deterministic=True)
-        x, reward, done, info = env.step(u)
+        states.append(x)
+        if monitor is not None:
+            if reward is None:
+                reward = -env.get_cost(x, u)
+            monitor.update_variables(t, states=x, outputs=y, control=u,
+                                     cost=-reward)
+
+        y, reward, done, info = env.step(u)
+        x = env.states
+        t += env.process.dt
         episode_starts = done
-        states.append(env.states)
         if done:
             env.reset()
             break
-    print(f"Final reward: {reward}")
+    # print(f"Final reward: {reward}")
     return np.expand_dims(states, 1)
 
 
@@ -180,40 +201,86 @@ def eval_mlp(env, model):
     return np.array(states)
 
 
-def main(save_model_to=None, load_model_from=None):
-    gpu = 2
-    os.environ['CUDA_VISIBLE_DEVICES'] = f'{gpu}'
+def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
+
+    if frozen_params is not None:
+        study.enqueue_trial(frozen_params)
+
+    trial = study.ask()
+
+    cost_threshold = trial.suggest_categorical('cost_threshold', [1e-4, 1e-3])
+    q_x = trial.suggest_float('q_x', 0.1, 10, log=True)
+    q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
+    r = trial.suggest_float('r', 0.01, 1, log=True)
 
     num_steps = 500
-    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1)
-    # env = DoubleIntegrator(q=1, r=0.01)
+    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1,
+                           cost_threshold=cost_threshold, q=[q_x, q_y], r=r)
     env = TimeLimit(env, num_steps)
-    check_env(env)
 
-    log_dir = os.path.join(_path, 'tensorboard_log')
-    model = RecurrentPPO('MlpLstmPolicy', env, verbose=1, device='cuda',
+    log_dir = os.path.join(path, 'tensorboard_log')
+    model = RecurrentPPO('MlpLstmPolicy', env, verbose=0, device='cuda',
                          tensorboard_log=log_dir)
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
-    if load_model_from is None:
-        model.learn(int(2e5), callback=[  # FigureRecorderTrain(),
-                                        FigureRecorderTest()])
-        if save_model_to is not None:
-            model.save(save_model_to)
-    else:
-        model = model.load(load_model_from)
+    model.learn(int(1e5), callback=[FigureRecorderTest(),
+                                    # FigureRecorderTrain()
+                                    ])
+    path_model = os.path.join(path_base, 'models',
+                              f'lqg_rnn_ppo_{trial.number}')
+    model.save(path_model)
 
-    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=20,
-    #                                           warn=False)
-    # print(mean_reward)
-    states = eval_rnn(env, model)
-    plot_trajectory(states, path_figure)
+    if show_plots:
+        states = eval_rnn(env, model)
+        path_figure = os.path.join(path, 'figures',
+                                   'lqg_rnn_ppo_trajectory.png')
+        plot_trajectory(states, path_figure)
+
+    rewards, episode_lengths = evaluate_policy(model, env, n_eval_episodes=100,
+                                               warn=False,
+                                               return_episode_rewards=True)
+    study.tell(trial, np.mean(episode_lengths))
 
 
 if __name__ == '__main__':
-    _path = '/home/bodrue/Data/neural_control/double_integrator/rnn_pid'
-    path_model = os.path.join(_path, 'models', 'lqg_rnn_ppo')
-    path_figure = os.path.join(_path, 'figures', 'lqg_rnn_ppo_trajectory.png')
-    main(save_model_to=path_model)
+    gpu = 3
+
+    _label = 'lqg_rnn_ppo'
+
+    # Make sure the keys are spelled exactly as the parameter names in
+    # trial.suggest calls. Every parameter listed here will not be swept over.
+    _frozen_params = None
+
+    if gpu is not None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
+
+    optuna.logging.set_verbosity(optuna.logging.INFO)
+    optuna.logging.get_logger('optuna').addHandler(
+        logging.StreamHandler(sys.stdout))
+
+    path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo'
+    os.makedirs(path_base, exist_ok=True)
+
+    study_name = _label
+    filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
+    storage_name = f'sqlite:///{filepath_output}'
+    _study = optuna.create_study(storage_name, study_name=study_name,
+                                 direction='minimize', load_if_exists=True)
+
+    num_trials = 100
+    for _ in trange(num_trials, desc='Optuna'):
+        main(_study, path_base, _frozen_params)
+        gc.collect()
+
+    print("Number of finished trials: ", len(_study.trials))
+
+    print("Best trial:")
+    best_trial = _study.best_trial
+
+    print("  Value: ", best_trial.value)
+
+    print("  Params: ")
+    for _key, value in best_trial.params.items():
+        print("    {}: {}".format(_key, value))
 
     sys.exit()
