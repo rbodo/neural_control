@@ -35,7 +35,7 @@ def main(config: 'CfgNode'):
     os.environ['CUDA_VISIBLE_DEVICES'] = f'{gpu}'
 
     path_figures = config.paths.PATH_FIGURES
-    path_model = config.paths.FILEPATH_MODEL
+    path_model = config.paths.FILEPATH_MODEL + f'_{n}'
     filepath_output_data = config.paths.FILEPATH_OUTPUT_DATA
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
@@ -63,7 +63,7 @@ def main(config: 'CfgNode'):
     add_variables(monitor)
 
     # Set cost threshold impossibly low so we always run for the full duration.
-    env = DoubleIntegrator(w, v, dt, RNG, cost_threshold=0, q=q, r=r)
+    env = DoubleIntegrator(w, v, dt, RNG, cost_threshold=1e-4, q=q, r=r)
     env = TimeLimit(env, num_steps)
 
     model = RecurrentPPO('MlpLstmPolicy', env, verbose=1, device='cuda')
@@ -83,12 +83,13 @@ def main(config: 'CfgNode'):
     df.to_pickle(filepath_output_data)
     print(f"Saved data to {filepath_output_data}.")
 
-    plot_cost(df, os.path.join(path_figures, 'lqg_rnn_ppo_cost.png'))
+    plot_cost(df, os.path.join(path_figures, f'lqg_rnn_ppo_{n}_cost.png'))
     plot_trajectories(df, os.path.join(path_figures,
-                                       'lqg_rnn_ppo_trajectory.png'))
+                                       f'lqg_rnn_ppo_{n}_trajectory.png'))
 
 
 if __name__ == '__main__':
+    n = 2
     _config = configs.config_lqg_vs_ppo.get_config()
 
     apply_config(_config)

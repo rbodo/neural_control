@@ -127,7 +127,7 @@ def plot_trajectories_vs_noise(df, path=None):
 
 
 def plot_trajectories(df, path=None):
-    idxs = np.random.choice(df['experiment'], 9, replace=False)
+    idxs = np.random.choice(df['experiment'].unique(), 9, replace=False)
     df = df[[i in idxs for i in df['experiment']]]
     g = sns.relplot(data=df, x='x', y='v', col='experiment', col_wrap=3,
                     kind='line', alpha=0.5, style='controller',

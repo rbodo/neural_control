@@ -249,7 +249,7 @@ if __name__ == '__main__':
 
     # Make sure the keys are spelled exactly as the parameter names in
     # trial.suggest calls. Every parameter listed here will not be swept over.
-    _frozen_params = None
+    _frozen_params = {'cost_threshold': 1e-4}
 
     if gpu is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
