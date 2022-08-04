@@ -2,6 +2,7 @@ import gc
 import logging
 import sys
 import os
+from typing import Union
 
 import numpy as np
 import gym
@@ -11,13 +12,12 @@ from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
 # from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback
-from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import Figure
 from tqdm import trange
-from typing import Union
 
 from src.double_integrator.control_systems import DI
+from src.double_integrator.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
 from src.double_integrator.utils import get_lqr_cost
 
 
@@ -208,24 +208,31 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
 
     trial = study.ask()
 
-    cost_threshold = trial.suggest_categorical('cost_threshold', [1e-4, 1e-3])
-    q_x = trial.suggest_float('q_x', 0.1, 10, log=True)
-    q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
-    r = trial.suggest_float('r', 0.01, 1, log=True)
+    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
+    num_steps = trial.suggest_int('num_steps', 10, 460, step=50)
+    cost_threshold = trial.suggest_float('cost_threshold', 1e-4, 1e-3,
+                                         log=True)
+    # q_x = trial.suggest_float('q_x', 0.1, 10, log=True)
+    # q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
+    # r = trial.suggest_float('r', 0.01, 1, log=True)
 
-    num_steps = 500
     env = DoubleIntegrator(var_x=1e-2, var_y=1e-1,
-                           cost_threshold=cost_threshold, q=[q_x, q_y], r=r)
-    env = TimeLimit(env, num_steps)
+                           cost_threshold=cost_threshold)
+    env = TimeLimit(env, 1000)
 
+    policy = MlpRnnPolicy
+    policy_kwargs = {'lstm_hidden_size': 50}
     log_dir = os.path.join(path, 'tensorboard_log')
-    model = RecurrentPPO('MlpLstmPolicy', env, verbose=0, device='cuda',
-                         tensorboard_log=log_dir)
+    model = RecurrentPPO(policy, env, verbose=0, device='cuda',
+                         tensorboard_log=log_dir, policy_kwargs=policy_kwargs,
+                         learning_rate=learning_rate, n_steps=num_steps,
+                         n_epochs=10, batch_size=num_steps)
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
-    model.learn(int(1e5), callback=[FigureRecorderTest(),
-                                    # FigureRecorderTrain()
-                                    ])
+    model.learn(int(1e5), callback=[
+        FigureRecorderTest(),
+        # FigureRecorderTrain()
+    ])
     path_model = os.path.join(path_base, 'models',
                               f'lqg_rnn_ppo_{trial.number}')
     model.save(path_model)
@@ -245,11 +252,13 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
 if __name__ == '__main__':
     gpu = 3
 
-    _label = 'lqg_rnn_ppo'
+    study_name = 'lqg_rnn_ppo'
 
     # Make sure the keys are spelled exactly as the parameter names in
     # trial.suggest calls. Every parameter listed here will not be swept over.
-    _frozen_params = {'cost_threshold': 1e-4}
+    _frozen_params = {
+        # 'cost_threshold': 1e-4,
+    }
 
     if gpu is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
@@ -258,10 +267,10 @@ if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
 
-    path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo'
+    path_base = \
+        '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/rnn'
     os.makedirs(path_base, exist_ok=True)
 
-    study_name = _label
     filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
     storage_name = f'sqlite:///{filepath_output}'
     _study = optuna.create_study(storage_name, study_name=study_name,
