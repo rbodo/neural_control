@@ -1,35 +1,184 @@
 import time
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Type, Union, Tuple, NamedTuple
+from typing import Any, Dict, List, Optional, Type, Union, Tuple, NamedTuple, \
+    Generator
 
 import gym
+from gym import spaces
 import numpy as np
 import torch as th
-from gym import spaces
+from sb3_contrib.common.recurrent.type_aliases import \
+    RecurrentRolloutBufferSamples
+from torch import nn
 from sb3_contrib.common.recurrent.buffers import RecurrentDictRolloutBuffer, \
-    RecurrentRolloutBuffer
-from sb3_contrib.ppo_recurrent.policies import CnnLstmPolicy, MlpLstmPolicy, \
-    MultiInputLstmPolicy
+    create_sequencers
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.distributions import Distribution
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import BasePolicy, ActorCriticPolicy
-from stable_baselines3.common.torch_layers import (BaseFeaturesExtractor,
-                                                   FlattenExtractor,
-                                                   MlpExtractor)
-from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback
-from stable_baselines3.common.type_aliases import Schedule
+from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, \
+    FlattenExtractor, MlpExtractor
+from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, \
+    Schedule
 from stable_baselines3.common.utils import explained_variance, \
     get_schedule_fn, obs_as_tensor, safe_mean
 from stable_baselines3.common.utils import zip_strict
-from stable_baselines3.common.vec_env import VecEnv
-from torch import nn
+from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 
 
 class RNNStates(NamedTuple):
-    pi: Tuple[th.Tensor, th.Tensor]
-    vf: Tuple[th.Tensor, th.Tensor]
+    pi: th.Tensor
+    vf: th.Tensor
+
+
+class RecurrentRolloutBuffer(RolloutBuffer):
+    """
+    Rollout buffer that also stores the LSTM cell and hidden states.
+
+    :param buffer_size: Max number of element in the buffer :param
+    observation_space: Observation space :param action_space: Action space
+    :param hidden_state_shape: Shape of the buffer that will collect lstm
+    states (n_steps, lstm.num_layers, n_envs, lstm.hidden_size) :param
+    device: PyTorch device :param gae_lambda: Factor for trade-off of bias
+    vs variance for Generalized Advantage Estimator Equivalent to classic
+    advantage when set to 1. :param gamma: Discount factor :param n_envs:
+    Number of parallel environments
+    """
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        hidden_state_shape: Tuple[int, int, int, int],
+        device: Union[th.device, str] = "cpu",
+        gae_lambda: float = 1,
+        gamma: float = 0.99,
+        n_envs: int = 1,
+    ):
+        self.hidden_state_shape = hidden_state_shape
+        self.seq_start_indices, self.seq_end_indices = None, None
+        self.hidden_states_pi = None
+        self.hidden_states_vf = None
+        super().__init__(buffer_size, observation_space, action_space, device,
+                         gae_lambda, gamma, n_envs)
+
+    def reset(self):
+        super().reset()
+        self.hidden_states_pi = np.zeros(self.hidden_state_shape, np.float32)
+        self.hidden_states_vf = np.zeros(self.hidden_state_shape, np.float32)
+
+    def add(self, *args, lstm_states: RNNStates, **kwargs) -> None:
+        """
+        :param lstm_states: LSTM cell and hidden state
+        """
+        self.hidden_states_pi[self.pos] = lstm_states.pi.cpu().numpy()
+        self.hidden_states_vf[self.pos] = lstm_states.vf.cpu().numpy()
+
+        super().add(*args, **kwargs)
+
+    def get(self, batch_size: Optional[int] = None) -> \
+            Generator[RecurrentRolloutBufferSamples, None, None]:
+        assert self.full, "Rollout buffer must be full before sampling from it"
+
+        # Prepare the data
+        if not self.generator_ready:
+            # hidden_state_shape = (self.n_steps, lstm.num_layers,
+            # self.n_envs, lstm.hidden_size) swap first to (self.n_steps,
+            # self.n_envs, lstm.num_layers, lstm.hidden_size)
+            for tensor in ["hidden_states_pi", "hidden_states_vf"]:
+                self.__dict__[tensor] = self.__dict__[tensor].swapaxes(1, 2)
+
+            # flatten but keep the sequence order
+            # 1. (n_steps, n_envs, *tensor_shape)
+            #   -> (n_envs, n_steps, *tensor_shape)
+            # 2. (n_envs, n_steps, *tensor_shape)
+            #   -> (n_envs * n_steps, *tensor_shape)
+            for tensor in [
+                "observations",
+                "actions",
+                "values",
+                "log_probs",
+                "advantages",
+                "returns",
+                "hidden_states_pi",
+                "hidden_states_vf",
+                "episode_starts",
+            ]:
+                self.__dict__[tensor] = \
+                    self.swap_and_flatten(self.__dict__[tensor])
+            self.generator_ready = True
+
+        # Return everything, don't create minibatches
+        if batch_size is None:
+            batch_size = self.buffer_size * self.n_envs
+
+        # Sampling strategy that allows any mini batch size but requires
+        # more complexity and use of padding
+        # Trick to shuffle a bit: keep the sequence order
+        # but split the indices in two
+        split_index = np.random.randint(self.buffer_size * self.n_envs)
+        indices = np.arange(self.buffer_size * self.n_envs)
+        indices = np.concatenate((indices[split_index:],
+                                  indices[:split_index]))
+
+        env_change = np.zeros(self.buffer_size * self.n_envs).reshape(
+            self.buffer_size, self.n_envs)
+        # Flag first timestep as change of environment
+        env_change[0, :] = 1.0
+        env_change = self.swap_and_flatten(env_change)
+
+        start_idx = 0
+        while start_idx < self.buffer_size * self.n_envs:
+            batch_inds = indices[start_idx: start_idx + batch_size]
+            yield self._get_samples(batch_inds, env_change)
+            start_idx += batch_size
+
+    # noinspection PyMethodOverriding
+    def _get_samples(
+        self,
+        batch_inds: np.ndarray,
+        env_change: np.ndarray,
+        env: Optional[VecNormalize] = None,
+    ) -> RecurrentRolloutBufferSamples:
+        # Retrieve sequence starts and utility function
+        self.seq_start_indices, self.pad, self.pad_and_flatten = \
+            create_sequencers(self.episode_starts[batch_inds],
+                              env_change[batch_inds], self.device)
+
+        n_layers = self.hidden_states_pi.shape[1]
+        # Number of sequences
+        n_seq = len(self.seq_start_indices)
+        max_length = self.pad(self.actions[batch_inds]).shape[1]
+        padded_batch_size = n_seq * max_length
+        # We retrieve the lstm hidden states that will allow
+        # to properly initialize the LSTM at the beginning of each sequence
+        # (n_steps, n_layers, n_envs, dim) -> (n_layers, n_seq, dim)
+        lstm_states_pi = self.hidden_states_pi[batch_inds][
+            self.seq_start_indices].reshape(n_layers, n_seq, -1)
+        # (n_steps, n_layers, n_envs, dim) -> (n_layers, n_seq, dim)
+        lstm_states_vf = self.hidden_states_vf[batch_inds][
+            self.seq_start_indices].reshape(n_layers, n_seq, -1)
+        lstm_states_pi = self.to_torch(lstm_states_pi)
+        lstm_states_vf = self.to_torch(lstm_states_vf)
+
+        return RecurrentRolloutBufferSamples(
+            # (batch_size, obs_dim) -> (n_seq, max_length, obs_dim)
+            #   -> (n_seq * max_length, obs_dim)
+            observations=self.pad(self.observations[batch_inds]).reshape(
+                (padded_batch_size,) + self.obs_shape),
+            actions=self.pad(self.actions[batch_inds]).reshape(
+                (padded_batch_size,) + self.actions.shape[1:]),
+            old_values=self.pad_and_flatten(self.values[batch_inds]),
+            old_log_prob=self.pad_and_flatten(self.log_probs[batch_inds]),
+            advantages=self.pad_and_flatten(self.advantages[batch_inds]),
+            returns=self.pad_and_flatten(self.returns[batch_inds]),
+            lstm_states=RNNStates(lstm_states_pi, lstm_states_vf),
+            episode_starts=self.pad_and_flatten(
+                self.episode_starts[batch_inds]),
+            mask=self.pad_and_flatten(np.ones_like(self.returns[batch_inds])),
+        )
 
 
 # noinspection PyIncorrectDocstring,PyMethodOverriding
@@ -84,7 +233,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         self.lstm_kwargs = lstm_kwargs or {}
         self.shared_lstm = shared_lstm
         self.enable_critic_lstm = enable_critic_lstm
-        self.lstm_actor = nn.LSTM(
+        self.lstm_actor = nn.RNN(
             self.features_dim,
             lstm_hidden_size,
             num_layers=n_lstm_layers,
@@ -107,7 +256,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
 
         # Use a separate LSTM for the critic
         if self.enable_critic_lstm:
-            self.lstm_critic = nn.LSTM(
+            self.lstm_critic = nn.RNN(
                 self.features_dim,
                 lstm_hidden_size,
                 num_layers=n_lstm_layers,
@@ -115,6 +264,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
             )
 
         # Setup optimizer with initial learning rate
+        # noinspection PyArgumentList
         self.optimizer = self.optimizer_class(
             self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
@@ -133,9 +283,9 @@ class MlpRnnPolicy(ActorCriticPolicy):
     @staticmethod
     def _process_sequence(
         features: th.Tensor,
-        lstm_states: Tuple[th.Tensor, th.Tensor],
+        lstm_states: th.Tensor,
         episode_starts: th.Tensor,
-        lstm: nn.LSTM,
+        lstm: nn.RNN,
     ) -> Tuple[th.Tensor, th.Tensor]:
         """
         Do a forward pass in the LSTM network.
@@ -149,7 +299,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         """
         # LSTM logic (sequence length, batch size, features dim) (batch size
         # = n_envs for data collection or n_seq when doing gradient update)
-        n_seq = lstm_states[0].shape[1]
+        n_seq = lstm_states.shape[1]
         # Batch to sequence (padded batch size, features_dim) -> (n_seq,
         # max length, features_dim) -> (max length, n_seq, features_dim)
         # note: max length (max sequence length) is always 1 during data
@@ -172,12 +322,8 @@ class MlpRnnPolicy(ActorCriticPolicy):
                                                   episode_starts):
             hidden, lstm_states = lstm(
                 features.unsqueeze(dim=0),
-                (
-                    # Reset the states at the beginning of a new episode
-                    (1.0 - episode_start).view(1, n_seq, 1) * lstm_states[0],
-                    (1.0 - episode_start).view(1, n_seq, 1) * lstm_states[1],
-                ),
-            )
+                # Reset the states at the beginning of a new episode
+                (1.0 - episode_start).view(1, n_seq, 1) * lstm_states)
             lstm_output += [hidden]
         # Sequence to batch
         # (sequence length, n_seq, lstm_out_dim) -> (batch_size, lstm_out_dim)
@@ -213,8 +359,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         elif self.shared_lstm:
             # Re-use LSTM features but do not backpropagate
             latent_vf = latent_pi.detach()
-            lstm_states_vf = (lstm_states_pi[0].detach(),
-                              lstm_states_pi[1].detach())
+            lstm_states_vf = lstm_states_pi.detach()
         else:
             # Critic only has a feedforward network
             latent_vf = self.critic(features)
@@ -234,9 +379,9 @@ class MlpRnnPolicy(ActorCriticPolicy):
     def get_distribution(
         self,
         obs: th.Tensor,
-        lstm_states: Tuple[th.Tensor, th.Tensor],
+        lstm_states: th.Tensor,
         episode_starts: th.Tensor,
-    ) -> Tuple[Distribution, Tuple[th.Tensor, ...]]:
+    ) -> Tuple[Distribution, th.Tensor]:
         """
         Get the current policy distribution given the observations.
 
@@ -255,7 +400,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
     def predict_values(
         self,
         obs: th.Tensor,
-        lstm_states: Tuple[th.Tensor, th.Tensor],
+        lstm_states: th.Tensor,
         episode_starts: th.Tensor,
     ) -> th.Tensor:
         """
@@ -324,10 +469,10 @@ class MlpRnnPolicy(ActorCriticPolicy):
     def _predict(
         self,
         observation: th.Tensor,
-        lstm_states: Tuple[th.Tensor, th.Tensor],
+        lstm_states: th.Tensor,
         episode_starts: th.Tensor,
         deterministic: bool = False,
-    ) -> Tuple[th.Tensor, Tuple[th.Tensor, ...]]:
+    ) -> Tuple[th.Tensor, th.Tensor]:
         """
         Get the action according to the policy for a given observation.
 
@@ -346,7 +491,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
     def predict(
         self,
         observation: Union[np.ndarray, Dict[str, np.ndarray]],
-        state: Optional[Tuple[np.ndarray, ...]] = None,
+        state: Optional[np.ndarray] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
@@ -376,21 +521,19 @@ class MlpRnnPolicy(ActorCriticPolicy):
             # Initialize hidden states to zeros
             state = np.concatenate([np.zeros(self.lstm_hidden_state_shape)
                                     for _ in range(n_envs)], axis=1)
-            state = (state, state)
 
         if episode_start is None:
             episode_start = np.array([False for _ in range(n_envs)])
 
         with th.no_grad():
             # Convert to PyTorch tensors
-            states = th.tensor(state[0]).float().to(self.device), \
-                     th.tensor(state[1]).float().to(self.device)
+            states = th.tensor(state, dtype=th.float).to(self.device)
             episode_starts = th.tensor(episode_start).float().to(self.device)
             actions, states = self._predict(
                 observation, lstm_states=states, episode_starts=episode_starts,
                 deterministic=deterministic
             )
-            states = (states[0].cpu().numpy(), states[1].cpu().numpy())
+            states = states.cpu().numpy()
 
         # Convert to numpy
         actions = actions.cpu().numpy()
@@ -458,12 +601,6 @@ class RecurrentPPO(OnPolicyAlgorithm):
     _init_setup_model: Whether or not to build the network at the creation
     of the instance
     """
-
-    policy_aliases: Dict[str, Type[BasePolicy]] = {
-        "MlpLstmPolicy": MlpLstmPolicy,
-        "CnnLstmPolicy": CnnLstmPolicy,
-        "MultiInputLstmPolicy": MultiInputLstmPolicy,
-    }
 
     def __init__(
             self,
@@ -555,15 +692,8 @@ class RecurrentPPO(OnPolicyAlgorithm):
                                      lstm.hidden_size)
         # hidden and cell states for actor and critic
         self._last_lstm_states = RNNStates(
-            (
                 th.zeros(single_hidden_state_shape).to(self.device),
-                th.zeros(single_hidden_state_shape).to(self.device),
-            ),
-            (
-                th.zeros(single_hidden_state_shape).to(self.device),
-                th.zeros(single_hidden_state_shape).to(self.device),
-            ),
-        )
+                th.zeros(single_hidden_state_shape).to(self.device))
 
         hidden_state_buffer_shape = (self.n_steps, lstm.num_layers,
                                      self.n_envs, lstm.hidden_size)
@@ -720,10 +850,8 @@ class RecurrentPPO(OnPolicyAlgorithm):
                     terminal_obs = self.policy.obs_to_tensor(
                         infos[idx]["terminal_observation"])[0]
                     with th.no_grad():
-                        terminal_lstm_state = (
-                            lstm_states.vf[0][:, idx: idx + 1, :],
-                            lstm_states.vf[1][:, idx: idx + 1, :],
-                        )
+                        terminal_lstm_state = \
+                            lstm_states.vf[0][:, idx: idx + 1, :]
                         # terminal_lstm_state = None
                         episode_starts = th.tensor([False]).float().to(
                             self.device)

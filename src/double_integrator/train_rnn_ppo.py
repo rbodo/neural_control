@@ -110,6 +110,7 @@ def get_states(model, i_step, num_steps=1):
 
 def plot_trajectory(states, path=None, show=False):
     plt.plot(states[:, 0, 0], states[:, 0, 1])
+    plt.plot(states[0, 0, 0], states[0, 0, 1], 'bo')
     plt.plot(0, 0, 'kx')
     plt.xlim(-1, 1)
     plt.ylim(-1, 1)
@@ -210,23 +211,21 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
 
     learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
     num_steps = trial.suggest_int('num_steps', 10, 460, step=50)
-    cost_threshold = trial.suggest_float('cost_threshold', 1e-4, 1e-3,
-                                         log=True)
+    # cost_threshold = trial.suggest_float('cost_threshold', 1e-4, 1e-3,
+    #                                      log=True)
     # q_x = trial.suggest_float('q_x', 0.1, 10, log=True)
     # q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
     # r = trial.suggest_float('r', 0.01, 1, log=True)
 
-    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1,
-                           cost_threshold=cost_threshold)
-    env = TimeLimit(env, 1000)
+    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4)
+    env = TimeLimit(env, 500)
 
-    policy = MlpRnnPolicy
     policy_kwargs = {'lstm_hidden_size': 50}
     log_dir = os.path.join(path, 'tensorboard_log')
-    model = RecurrentPPO(policy, env, verbose=0, device='cuda',
+    model = RecurrentPPO(MlpRnnPolicy, env, verbose=0, device='cuda',
                          tensorboard_log=log_dir, policy_kwargs=policy_kwargs,
                          learning_rate=learning_rate, n_steps=num_steps,
-                         n_epochs=10, batch_size=num_steps)
+                         n_epochs=10)
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
     model.learn(int(1e5), callback=[
@@ -257,7 +256,8 @@ if __name__ == '__main__':
     # Make sure the keys are spelled exactly as the parameter names in
     # trial.suggest calls. Every parameter listed here will not be swept over.
     _frozen_params = {
-        # 'cost_threshold': 1e-4,
+        'learning_rate': 2e-4,
+        'num_steps': 300,
     }
 
     if gpu is not None:

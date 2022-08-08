@@ -3,7 +3,6 @@ import os
 
 import numpy as np
 from gym.wrappers import TimeLimit
-from sb3_contrib import RecurrentPPO
 from tqdm.contrib import tzip
 from yacs.config import CfgNode
 
@@ -12,6 +11,7 @@ from src.double_integrator.control_systems import DiLqg
 from src.double_integrator.di_lqg import jitter, get_grid
 from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.plotting import plot_cost, plot_trajectories
+from src.double_integrator.ppo_recurrent import MlpRnnPolicy, RecurrentPPO
 from src.double_integrator.train_rnn_ppo import DoubleIntegrator, eval_rnn
 from src.double_integrator.utils import apply_config, RNG, Monitor
 
@@ -30,8 +30,8 @@ def run_lqg(system, times, monitor, inits):
         x, y, u, c, x_est, Sigma = system.step(t, x, x_est, Sigma)
 
 
-def main(config: 'CfgNode'):
-    gpu = 2
+def main(config: 'CfgNode', n: int):
+    gpu = 3
     os.environ['CUDA_VISIBLE_DEVICES'] = f'{gpu}'
 
     path_figures = config.paths.PATH_FIGURES
@@ -66,7 +66,9 @@ def main(config: 'CfgNode'):
     env = DoubleIntegrator(w, v, dt, RNG, cost_threshold=1e-4, q=q, r=r)
     env = TimeLimit(env, num_steps)
 
-    model = RecurrentPPO('MlpLstmPolicy', env, verbose=1, device='cuda')
+    policy_kwargs = {'lstm_hidden_size': 50}
+    model = RecurrentPPO(MlpRnnPolicy, env, verbose=1, device='cuda',
+                         policy_kwargs=policy_kwargs)
     model = model.load(path_model)
 
     for i, (x, x_est) in enumerate(tzip(X0, X0_est, leave=False)):
@@ -89,11 +91,9 @@ def main(config: 'CfgNode'):
 
 
 if __name__ == '__main__':
-    n = 2
-    _config = configs.config_lqg_vs_ppo.get_config()
-
-    apply_config(_config)
-
-    main(_config)
+    for _n in [15]:  # [1, 2, 9, 13, 14, 17, 22, 23, 25, 28, 30]:
+        _config = configs.config_lqg_vs_ppo.get_config()
+        apply_config(_config)
+        main(_config, _n)
 
     sys.exit()
