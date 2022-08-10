@@ -24,7 +24,8 @@ class DiRnnLqe(DiLqg):
         # controller is replaced by the RNN.
         self.n_x_control = num_hidden * num_layers
 
-        self.rnn = RNNModel(num_hidden, num_layers)
+        self.rnn = RNNModel(num_hidden, num_layers, self.n_y_control,
+                            self.n_u_control)
         # self.rnn.hybridize()
         if path_model is None:
             self.rnn.initialize()

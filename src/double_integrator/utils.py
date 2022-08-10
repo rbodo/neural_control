@@ -227,7 +227,8 @@ def apply_config(config):
 def create_paths(config):
     for k, p in config.paths.items():
         if 'FILE' in k:
-            p = os.path.dirname(p)
+            if p is not None:
+                p = os.path.dirname(p)
         if p:
             os.makedirs(p, exist_ok=True)
 

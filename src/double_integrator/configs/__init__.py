@@ -13,6 +13,7 @@ from src.double_integrator.configs import (
     config_mlp_lqe,
     config_open,
     config_rnn,
+    config_rnn_analytic,
     config_rnn_defaults,
     config_rnn_lqe,
     config_test_rnn,

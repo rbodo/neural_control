@@ -147,7 +147,8 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     test_data_loader, train_data_loader = get_data_loaders(data, config,
                                                            'observations')
 
-    model = RNNModel(num_hidden, num_layers, num_outputs, activation)
+    model = RNNModel(num_hidden, num_layers, num_outputs, num_inputs,
+                     activation)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)
 

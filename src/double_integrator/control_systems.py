@@ -487,7 +487,7 @@ class DiLqeRnn(LqeRnn):
 
 class RNNModel(mx.gluon.HybridBlock):
 
-    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1,
+    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
                  activation='relu', **kwargs):
 
         super().__init__(**kwargs)
@@ -496,7 +496,12 @@ class RNNModel(mx.gluon.HybridBlock):
         self.num_layers = num_layers
 
         with self.name_scope():
-            self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation)
+            if self.num_layers > 1:
+                self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation,
+                                            input_size=input_size)
+            else:
+                self.rnn = mx.gluon.rnn.RNNCell(num_hidden, activation,
+                                                input_size=input_size)
             self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
                                              in_units=num_hidden,
                                              flatten=False)
