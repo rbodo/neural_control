@@ -126,7 +126,7 @@ def plot_trajectories_vs_noise(df, path=None):
     plt.show()
 
 
-def plot_trajectories(df, path=None):
+def plot_trajectories(df, path=None, show=True):
     idxs = np.random.choice(df['experiment'].unique(), 9, replace=False)
     df = df[[i in idxs for i in df['experiment']]]
     g = sns.relplot(data=df, x='x', y='v', col='experiment', col_wrap=3,
@@ -142,7 +142,8 @@ def plot_trajectories(df, path=None):
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
 
 
 def plot_cost_vs_noise(df, path=None):
@@ -165,7 +166,7 @@ def plot_cost_vs_noise(df, path=None):
     plt.show()
 
 
-def plot_cost(df, path=None):
+def plot_cost(df, path=None, show=True):
     g = sns.relplot(data=df, x='times', y='c', style='controller',
                     kind='line', hue='controller')
     g.set(yscale='log')
@@ -173,7 +174,8 @@ def plot_cost(df, path=None):
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
 
 
 def plot_cost_vs_noise_control(df, path=None):

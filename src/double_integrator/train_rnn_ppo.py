@@ -2,7 +2,7 @@ import gc
 import logging
 import sys
 import os
-from typing import Union
+from typing import Union, Callable
 
 import numpy as np
 import gym
@@ -30,12 +30,13 @@ class DoubleIntegrator(gym.Env):
                  cost_threshold=1e-3, state_threshold=None,
                  q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32):
         super().__init__()
+        self.dt = dt
         self.dtype = dtype
         num_inputs = 1
         num_outputs = 1
         num_states = 2
         self.process = DI(num_inputs, num_outputs, num_states, var_x, var_y,
-                          dt, rng)
+                          self.dt, rng)
 
         self.min = -1
         self.max = 1
@@ -62,7 +63,7 @@ class DoubleIntegrator(gym.Env):
 
     def get_cost(self, x, u):
         return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
-                            normalize=True).item()
+                            normalize=False).item()
 
     def step(self, action):
 
@@ -71,21 +72,21 @@ class DoubleIntegrator(gym.Env):
 
         self.cost = self.get_cost(self.states, action)
 
-        reward = -self.cost
-
         done = self.cost < self.cost_threshold
         # or abs(self.states[0].item()) > self.state_threshold
+
+        reward = -self.cost + done * 10 * np.exp(-self.t / 4)
 
         observation = self.process.output(self.t, self.states, action)
         np.clip(observation, self.min, self.max, observation)
 
-        self.t += self.process.dt
+        self.t += self.dt
 
         return observation, reward, done, {}
 
     def reset(self, state_init=None):
 
-        self.states = self.init_state_space.sample() if state_init is None\
+        self.states = self.init_state_space.sample() if state_init is None \
             else state_init
         action = 0
 
@@ -147,10 +148,12 @@ class FigureRecorderTest(BaseCallback):
     def _on_rollout_end(self):
         if hasattr(self.model, 'replay_buffer') and self.n_calls % 1000 > 0:
             return
-        states = eval_rnn(self.locals['env'].envs[0], self.model)
+        states, rewards = eval_rnn(self.locals['env'].envs[0], self.model)
         figure = plot_trajectory(states)
         self.logger.record("trajectory/eval", Figure(figure, close=True),
                            exclude=("stdout", "log", "json", "csv"))
+        self.logger.record("test/episode_reward", np.sum(rewards))
+        self.logger.record("test/episode_length", len(rewards))
         plt.close()
 
 
@@ -158,7 +161,6 @@ def eval_rnn(env, model, x0=None, monitor=None):
     t = 0
     y = env.reset(state_init=x0)
     x = env.states
-    reward = None
 
     # cell and hidden state of the LSTM
     lstm_states = None
@@ -166,18 +168,18 @@ def eval_rnn(env, model, x0=None, monitor=None):
     # Episode start signals are used to reset the lstm states
     episode_starts = np.ones((num_envs,), dtype=bool)
     states = []
+    rewards = []
     while True:
         u, lstm_states = model.predict(y, state=lstm_states,
                                        episode_start=episode_starts,
                                        deterministic=True)
         states.append(x)
         if monitor is not None:
-            if reward is None:
-                reward = -env.get_cost(x, u)
             monitor.update_variables(t, states=x, outputs=y, control=u,
-                                     cost=-reward)
+                                     cost=env.cost)
 
         y, reward, done, info = env.step(u)
+        rewards.append(reward)
         x = env.states
         t += env.process.dt
         episode_starts = done
@@ -185,7 +187,7 @@ def eval_rnn(env, model, x0=None, monitor=None):
             env.reset()
             break
     # print(f"Final reward: {reward}")
-    return np.expand_dims(states, 1)
+    return np.expand_dims(states, 1), rewards
 
 
 def eval_mlp(env, model):
@@ -202,6 +204,28 @@ def eval_mlp(env, model):
     return np.array(states)
 
 
+def linear_schedule(initial_value: float,
+                    q: float = 0.01) -> Callable[[float], float]:
+    """
+    Linear learning rate schedule.
+
+    :param initial_value: Initial learning rate.
+    :param q: Fraction of initial learning rate at end of progress.
+    :return: schedule that computes
+      current learning rate depending on remaining progress
+    """
+    def func(progress_remaining: float) -> float:
+        """
+        Progress will decrease from 1 (beginning) to 0.
+
+        :param progress_remaining:
+        :return: current learning rate
+        """
+        return initial_value * (progress_remaining * (1 - q) + q)
+
+    return func
+
+
 def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
 
     if frozen_params is not None:
@@ -210,7 +234,7 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
     trial = study.ask()
 
     learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
-    num_steps = trial.suggest_int('num_steps', 10, 460, step=50)
+    num_steps = trial.suggest_int('num_steps', 100, 500, step=50)
     # cost_threshold = trial.suggest_float('cost_threshold', 1e-4, 1e-3,
     #                                      log=True)
     # q_x = trial.suggest_float('q_x', 0.1, 10, log=True)
@@ -218,17 +242,21 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
     # r = trial.suggest_float('r', 0.01, 1, log=True)
 
     env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4)
-    env = TimeLimit(env, 500)
+    env = TimeLimit(env, num_steps)
 
-    policy_kwargs = {'lstm_hidden_size': 50}
+    policy_kwargs = {'lstm_hidden_size': 50,
+                     'net_arch': [],
+                     # 'shared_lstm': True,
+                     # 'enable_critic_lstm': False,
+                     }
     log_dir = os.path.join(path, 'tensorboard_log')
     model = RecurrentPPO(MlpRnnPolicy, env, verbose=0, device='cuda',
                          tensorboard_log=log_dir, policy_kwargs=policy_kwargs,
-                         learning_rate=learning_rate, n_steps=num_steps,
-                         n_epochs=10)
+                         learning_rate=linear_schedule(learning_rate, 0.005),
+                         n_steps=num_steps, n_epochs=10)
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
-    model.learn(int(1e5), callback=[
+    model.learn(int(5e5), callback=[
         FigureRecorderTest(),
         # FigureRecorderTrain()
     ])
@@ -237,7 +265,7 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
     model.save(path_model)
 
     if show_plots:
-        states = eval_rnn(env, model)
+        states, rewards = eval_rnn(env, model)
         path_figure = os.path.join(path, 'figures',
                                    'lqg_rnn_ppo_trajectory.png')
         plot_trajectory(states, path_figure)
@@ -245,7 +273,7 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
     rewards, episode_lengths = evaluate_policy(model, env, n_eval_episodes=100,
                                                warn=False,
                                                return_episode_rewards=True)
-    study.tell(trial, np.mean(episode_lengths))
+    study.tell(trial, np.mean(rewards))
 
 
 if __name__ == '__main__':
@@ -267,16 +295,16 @@ if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
 
-    path_base = \
-        '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/rnn'
+    path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/' \
+                'rnn/maximize_rewards'
     os.makedirs(path_base, exist_ok=True)
 
     filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
     storage_name = f'sqlite:///{filepath_output}'
     _study = optuna.create_study(storage_name, study_name=study_name,
-                                 direction='minimize', load_if_exists=True)
+                                 direction='maximize', load_if_exists=True)
 
-    num_trials = 100
+    num_trials = 5
     for _ in trange(num_trials, desc='Optuna'):
         main(_study, path_base, _frozen_params)
         gc.collect()

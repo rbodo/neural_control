@@ -85,13 +85,15 @@ def main(config: 'CfgNode', n: int):
     df.to_pickle(filepath_output_data)
     print(f"Saved data to {filepath_output_data}.")
 
-    plot_cost(df, os.path.join(path_figures, f'lqg_rnn_ppo_{n}_cost.png'))
+    plot_cost(df, os.path.join(path_figures, f'lqg_rnn_ppo_{n}_cost.png'),
+              show=False)
     plot_trajectories(df, os.path.join(path_figures,
-                                       f'lqg_rnn_ppo_{n}_trajectory.png'))
+                                       f'lqg_rnn_ppo_{n}_trajectory.png'),
+                      show=False)
 
 
 if __name__ == '__main__':
-    for _n in [15]:  # [1, 2, 9, 13, 14, 17, 22, 23, 25, 28, 30]:
+    for _n in [23, 26, 27]:
         _config = configs.config_lqg_vs_ppo.get_config()
         apply_config(_config)
         main(_config, _n)

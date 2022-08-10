@@ -850,8 +850,7 @@ class RecurrentPPO(OnPolicyAlgorithm):
                     terminal_obs = self.policy.obs_to_tensor(
                         infos[idx]["terminal_observation"])[0]
                     with th.no_grad():
-                        terminal_lstm_state = \
-                            lstm_states.vf[0][:, idx: idx + 1, :]
+                        terminal_lstm_state = lstm_states.vf[:, idx: idx + 1]
                         # terminal_lstm_state = None
                         episode_starts = th.tensor([False]).float().to(
                             self.device)
@@ -1089,10 +1088,13 @@ class RecurrentPPO(OnPolicyAlgorithm):
                                    exclude="tensorboard")
                 if len(self.ep_info_buffer) > 0 and len(
                         self.ep_info_buffer[0]) > 0:
-                    self.logger.record("rollout/ep_rew_mean", safe_mean(
-                        [ep_info["r"] for ep_info in self.ep_info_buffer]))
-                    self.logger.record("rollout/ep_len_mean", safe_mean(
-                        [ep_info["l"] for ep_info in self.ep_info_buffer]))
+                    self.logger.record(
+                        "rollout/moving_avg_of_total_episode_rewards",
+                        safe_mean([ep_info["r"] for ep_info in
+                                   self.ep_info_buffer]))
+                    self.logger.record("rollout/moving_avg_of_episode_lengths",
+                                       safe_mean([ep_info["l"] for ep_info
+                                                  in self.ep_info_buffer]))
                 self.logger.record("time/fps", fps)
                 self.logger.record("time/time_elapsed",
                                    int(time.time() - self.start_time),
