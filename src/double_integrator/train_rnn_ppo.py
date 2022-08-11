@@ -328,9 +328,9 @@ if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
 
-    # path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/' \
-    #             'rnn/maximize_rewards'
-    path_base = '/home/bodrue/PycharmProjects/neural_control/src/double_integrator'
+    path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/' \
+                'rnn/maximize_rewards'
+    # path_base = '/home/bodrue/PycharmProjects/neural_control/src/double_integrator'
     os.makedirs(path_base, exist_ok=True)
 
     filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
