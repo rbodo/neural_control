@@ -276,7 +276,7 @@ def main(study: optuna.Study, path, frozen_params=None,
                          n_steps=num_steps, n_epochs=10)
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
-    model.learn(int(5e5), callback=[
+    model.learn(int(1e3), callback=[
         FigureRecorderTest(),
         # FigureRecorderTrain()
     ])
@@ -328,8 +328,9 @@ if __name__ == '__main__':
     optuna.logging.get_logger('optuna').addHandler(
         logging.StreamHandler(sys.stdout))
 
-    path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/' \
-                'rnn/maximize_rewards'
+    # path_base = '/home/bodrue/Data/neural_control/double_integrator/rnn_ppo/' \
+    #             'rnn/maximize_rewards'
+    path_base = '/home/bodrue/PycharmProjects/neural_control/src/double_integrator'
     os.makedirs(path_base, exist_ok=True)
 
     filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
