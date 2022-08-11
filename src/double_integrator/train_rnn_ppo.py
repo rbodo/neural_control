@@ -99,7 +99,7 @@ class DoubleIntegrator(gym.Env):
     def render(self, mode='human'):
         if mode != 'console':
             raise NotImplementedError()
-        print("States: ", self.states, "\tCost: ", self.cost)
+        logging.info("States: ", self.states, "\tCost: ", self.cost)
 
 
 def get_states(model, i_step, num_steps=1):
@@ -186,7 +186,7 @@ def eval_rnn(env, model, x0=None, monitor=None):
         if done:
             env.reset()
             break
-    # print(f"Final reward: {reward}")
+    # logging.info(f"Final reward: {reward}")
     return np.expand_dims(states, 1), rewards
 
 
@@ -200,7 +200,7 @@ def eval_mlp(env, model):
         if done:
             env.reset()
             break
-    print(f"Final reward: {reward}")
+    logging.info(f"Final reward: {reward}")
     return np.array(states)
 
 
@@ -277,6 +277,8 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.WARN)
+
     gpu = 3
 
     study_name = 'lqg_rnn_ppo'
@@ -309,15 +311,15 @@ if __name__ == '__main__':
         main(_study, path_base, _frozen_params)
         gc.collect()
 
-    print("Number of finished trials: ", len(_study.trials))
+    logging.info("Number of finished trials: ", len(_study.trials))
 
-    print("Best trial:")
+    logging.info("Best trial:")
     best_trial = _study.best_trial
 
-    print("  Value: ", best_trial.value)
+    logging.info("  Value: ", best_trial.value)
 
-    print("  Params: ")
+    logging.info("  Params: ")
     for _key, value in best_trial.params.items():
-        print("    {}: {}".format(_key, value))
+        logging.info("    {}: {}".format(_key, value))
 
     sys.exit()
