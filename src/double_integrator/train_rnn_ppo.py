@@ -2,15 +2,19 @@ import gc
 import logging
 import sys
 import os
+import warnings
 from typing import Union, Callable
 
+import mlflow
 import numpy as np
 import gym
-import optuna
 from gym import spaces
 from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
 # from stable_baselines3 import PPO, SAC
+import optuna
+from optuna.exceptions import ExperimentalWarning
+from optuna.integration.mlflow import MLflowCallback, RUN_ID_ATTRIBUTE_KEY
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import Figure
@@ -136,8 +140,8 @@ class FigureRecorderTrain(BaseCallback):
             if states is None:
                 return
         figure = plot_trajectory(states)
-        self.logger.record("trajectory/train", Figure(figure, close=True),
-                           exclude=("stdout", "log", "json", "csv"))
+        self.logger.record('trajectory/train', Figure(figure, close=True),
+                           exclude=('stdout', 'log', 'json', 'csv'))
         plt.close()
 
 
@@ -146,14 +150,20 @@ class FigureRecorderTest(BaseCallback):
         return True
 
     def _on_rollout_end(self):
-        if hasattr(self.model, 'replay_buffer') and self.n_calls % 1000 > 0:
+        n = self.n_calls
+        if hasattr(self.model, 'replay_buffer') and n % 1000 > 0:
             return
         states, rewards = eval_rnn(self.locals['env'].envs[0], self.model)
+        episode_reward = np.sum(rewards)
+        episode_length = len(rewards)
         figure = plot_trajectory(states)
-        self.logger.record("trajectory/eval", Figure(figure, close=True),
-                           exclude=("stdout", "log", "json", "csv"))
-        self.logger.record("test/episode_reward", np.sum(rewards))
-        self.logger.record("test/episode_length", len(rewards))
+        self.logger.record('trajectory/eval', Figure(figure, close=True),
+                           exclude=('stdout', 'log', 'json', 'csv'))
+        self.logger.record('test/episode_reward', episode_reward)
+        self.logger.record('test/episode_length', episode_length)
+        mlflow.log_figure(figure, f'figures/trajectory_{n}.png')
+        mlflow.log_metric(key='episode_reward', value=episode_reward, step=n)
+        mlflow.log_metric(key='episode_length', value=episode_length, step=n)
         plt.close()
 
 
@@ -226,12 +236,22 @@ def linear_schedule(initial_value: float,
     return func
 
 
-def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
+# noinspection PyProtectedMember
+def main(study: optuna.Study, path, frozen_params=None,
+         mlflow_callback: MLflowCallback = None, show_plots=False):
 
     if frozen_params is not None:
         study.enqueue_trial(frozen_params)
 
     trial = study.ask()
+
+    if mlflow_callback is not None:
+        mlflow_callback._initialize_experiment(study)
+        run = mlflow.start_run(run_name=str(trial.number),
+                               nested=mlflow_callback._nest_trials)
+        trial.set_system_attr(RUN_ID_ATTRIBUTE_KEY, run.info.run_id)
+    else:
+        run = None
 
     learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
     num_steps = trial.suggest_int('num_steps', 100, 500, step=50)
@@ -260,9 +280,6 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
         FigureRecorderTest(),
         # FigureRecorderTrain()
     ])
-    path_model = os.path.join(path_base, 'models',
-                              f'lqg_rnn_ppo_{trial.number}')
-    model.save(path_model)
 
     if show_plots:
         states, rewards = eval_rnn(env, model)
@@ -275,19 +292,33 @@ def main(study: optuna.Study, path, frozen_params=None, show_plots=False):
                                                return_episode_rewards=True)
     study.tell(trial, np.mean(rewards))
 
+    if mlflow_callback is None:
+        path_model = os.path.join(path_base, 'models',
+                                  f'lqg_rnn_ppo_{trial.number}')
+    else:
+        frozen_trial = study._storage.get_trial(trial._trial_id)
+        mlflow_callback(study, frozen_trial)
+        mlflow.log_artifact(model.logger.get_dir(), 'tensorboard_log')
+        path_model = os.path.join(mlflow.get_artifact_uri().split(':', 1)[1],
+                                  f'models/model_{trial.number}')
+        # mlflow.pytorch.log_model(model, f'models/model_{trial.number}')
+        run.__exit__(None, None, None)
+    model.save(path_model)
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
+    warnings.filterwarnings('ignore', category=ExperimentalWarning)
 
-    gpu = 3
+    gpu = 0
 
     study_name = 'lqg_rnn_ppo'
 
     # Make sure the keys are spelled exactly as the parameter names in
     # trial.suggest calls. Every parameter listed here will not be swept over.
     _frozen_params = {
-        'learning_rate': 2e-4,
-        'num_steps': 300,
+        # 'learning_rate': 2e-4,
+        # 'num_steps': 300,
     }
 
     if gpu is not None:
@@ -302,13 +333,17 @@ if __name__ == '__main__':
     os.makedirs(path_base, exist_ok=True)
 
     filepath_output = os.path.join(path_base, 'optuna', study_name + '.db')
+    os.makedirs(os.path.dirname(filepath_output), exist_ok=True)
     storage_name = f'sqlite:///{filepath_output}'
     _study = optuna.create_study(storage_name, study_name=study_name,
                                  direction='maximize', load_if_exists=True)
 
+    _mlflow_callback = MLflowCallback('file:' + path_base + '/mlruns',
+                                      metric_name='reward', nest_trials=True)
+
     num_trials = 5
     for _ in trange(num_trials, desc='Optuna'):
-        main(_study, path_base, _frozen_params)
+        main(_study, path_base, _frozen_params, _mlflow_callback)
         gc.collect()
 
     logging.info("Number of finished trials: ", len(_study.trials))

@@ -1,0 +1,5 @@
+name: RNN PPO
+
+entry_points:
+  main:
+    command: "python train_rnn_ppo.py"
