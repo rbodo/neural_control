@@ -88,6 +88,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             plt.ylabel('Control')
             # plt.show()
             mlflow.log_figure(fig, f'figures/control_{epoch}.png')
+            plt.close(fig)
 
         validation_loss = evaluate(model, test_data_loader, loss_function,
                                    hidden_init, context)
@@ -124,8 +125,8 @@ def train_sweep(config):
 
     dfs = []
     config.defrost()
-    # mlflow.set_tracking_uri(
-    #     os.path.join('file:' + config.paths.BASE_PATH, 'mlruns'))
+    mlflow.set_tracking_uri(
+        os.path.join('file:' + config.paths.BASE_PATH, 'mlruns'))
     mlflow.set_experiment('train_rnn_controller')
     mlflow.start_run(run_name='Noise sweep parent')
     for w, v in tqdm(product(process_noises, observation_noises), 'noise',
