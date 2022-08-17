@@ -3,7 +3,9 @@ import time
 from collections import OrderedDict
 from itertools import product
 from typing import Tuple
+from urllib.parse import unquote, urlparse
 
+import mlflow
 import numpy as np
 import pandas as pd
 
@@ -245,3 +247,7 @@ def apply_timestamp(path, timestamp=None):
     if timestamp is None:
         timestamp = time.strftime('%Y%m%d_%H%M%S')
     return os.path.join(path, timestamp)
+
+
+def get_artifact_path(relative_subpath=None):
+    return unquote(urlparse(mlflow.get_artifact_uri(relative_subpath)).path)

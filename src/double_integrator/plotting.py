@@ -383,6 +383,8 @@ def plot_training_curve(train_loss, valid_loss, path=None,
     if show:
         plt.show()
 
+    return fig
+
 
 def plot_rnn_states_vs_lqe_estimates(df, path):
     col_wrap = int(np.sqrt(df['process_noise'].nunique()))

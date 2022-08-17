@@ -14,10 +14,9 @@ from tqdm.contrib import tenumerate
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel
-from src.double_integrator.utils import apply_config
-from src.double_integrator.plotting import plot_training_curve, float2str
-from src.double_integrator.train_rnn import (get_data_loaders, get_model_name,
-                                             evaluate)
+from src.double_integrator.plotting import plot_training_curve
+from src.double_integrator.train_rnn import (get_data_loaders, evaluate)
+from src.double_integrator.utils import get_artifact_path
 
 
 def train_single(config, plot_control=True, plot_loss=True, save_model=True):
@@ -86,7 +85,6 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             plt.legend()
             plt.xlabel('Time')
             plt.ylabel('Control')
-            # plt.show()
             mlflow.log_figure(fig, f'figures/control_{epoch}.png')
             plt.close(fig)
 
@@ -101,25 +99,19 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
         mlflow.log_metric('mean_training_loss', training_loss_mean, epoch)
 
     if plot_loss:
-        path_figures = config.paths.PATH_FIGURES
-        w = float2str(config.process.PROCESS_NOISES[0])
-        v = float2str(config.process.OBSERVATION_NOISES[0])
-        filename = f'training_curve_{w}_{v}.png'
-        path_plot = os.path.join(path_figures, filename)
-        plot_training_curve(training_losses, validation_losses, path_plot,
-                            show=False)
-        mlflow.log_figure(plt.gcf(), os.path.join('figures', filename))
+        f = plot_training_curve(training_losses, validation_losses, show=False)
+        mlflow.log_figure(f, os.path.join('figures', 'training_curve.png'))
 
     if save_model:
-        model.save_parameters(config.paths.FILEPATH_MODEL)
-        logging.info("Saved model to {}.".format(config.paths.FILEPATH_MODEL))
-        mlflow.log_artifact(config.paths.FILEPATH_MODEL, 'models')
+        path_model = get_artifact_path('models/rnn.params')
+        os.makedirs(os.path.dirname(path_model), exist_ok=True)
+        model.save_parameters(path_model)
+        logging.info(f"Saved model to {path_model}.")
 
     return training_losses, validation_losses
 
 
 def train_sweep(config):
-    path, filename = os.path.split(config.paths.FILEPATH_MODEL)
     process_noises = config.process.PROCESS_NOISES
     observation_noises = config.process.OBSERVATION_NOISES
 
@@ -129,11 +121,11 @@ def train_sweep(config):
         os.path.join('file:' + config.paths.BASE_PATH, 'mlruns'))
     mlflow.set_experiment('train_rnn_controller')
     mlflow.start_run(run_name='Noise sweep parent')
+    with open(get_artifact_path('config.txt'), 'w') as f:
+        f.write(_config.dump())
     for w, v in tqdm(product(process_noises, observation_noises), 'noise',
                      leave=False):
         mlflow.start_run(run_name='Noise sweep child', nested=True)
-        path_model = os.path.join(path, get_model_name(filename, w, v))
-        config.paths.FILEPATH_MODEL = path_model
         config.process.PROCESS_NOISES = [w]
         config.process.OBSERVATION_NOISES = [v]
 
@@ -147,8 +139,7 @@ def train_sweep(config):
         mlflow.end_run()
 
     df = pd.concat(dfs, ignore_index=True)
-    df.to_pickle(config.paths.FILEPATH_OUTPUT_DATA)
-    mlflow.log_artifact(config.paths.FILEPATH_OUTPUT_DATA)
+    df.to_pickle(get_artifact_path('output.pkl'))
 
 
 if __name__ == '__main__':
@@ -156,8 +147,6 @@ if __name__ == '__main__':
     GPU = 2
 
     _config = configs.config_train_rnn_controller.get_config()
-
-    apply_config(_config)
 
     train_sweep(_config)
 
