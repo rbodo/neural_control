@@ -87,7 +87,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             plt.xlabel('Time')
             plt.ylabel('Control')
             # plt.show()
-            mlflow.log_figure(fig, f'figures/control_{epoch}.png')
+            # mlflow.log_figure(fig, f'figures/control_{epoch}.png')
 
         validation_loss = evaluate(model, test_data_loader, loss_function,
                                    hidden_init, context)
