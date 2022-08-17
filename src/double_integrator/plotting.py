@@ -361,7 +361,7 @@ def format_legend(legend):
 
 
 def plot_training_curve(train_loss, valid_loss, path=None,
-                        use_current_figure=False):
+                        use_current_figure=False, show=True):
     if use_current_figure:
         ax = plt.gca()
         fig = plt.gcf()
@@ -380,7 +380,8 @@ def plot_training_curve(train_loss, valid_loss, path=None,
 
     if path is not None:
         fig.savefig(path, bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
 
 
 def plot_rnn_states_vs_lqe_estimates(df, path):
