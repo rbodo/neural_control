@@ -1,7 +1,5 @@
 import os
 
-import mxnet as mx
-
 from src.double_integrator import configs
 from src.double_integrator.utils import apply_timestamp
 

@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -11,6 +12,7 @@ from src.double_integrator.plotting import create_plots
 
 
 def main(config):
+    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
     label = 'rnn'
     process_noise = config.process.PROCESS_NOISES[0]
