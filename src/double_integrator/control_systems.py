@@ -496,12 +496,13 @@ class RNNModel(mx.gluon.HybridBlock):
         self.num_layers = num_layers
 
         with self.name_scope():
-            if self.num_layers > 1:
+            if self.num_layers == 1 and activation == 'linear':
+                self.rnn = mx.gluon.rnn.RNNCell(num_hidden,
+                                                mx.gluon.nn.LeakyReLU(1),
+                                                input_size=input_size)
+            else:
                 self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation,
                                             input_size=input_size)
-            else:
-                self.rnn = mx.gluon.rnn.RNNCell(num_hidden, activation,
-                                                input_size=input_size)
             self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
                                              in_units=num_hidden,
                                              flatten=False)

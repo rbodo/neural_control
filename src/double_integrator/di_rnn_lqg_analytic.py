@@ -2,7 +2,6 @@ import os
 import sys
 
 import numpy as np
-import mxnet as mx
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DiRnn
@@ -22,8 +21,6 @@ def main(config):
     dt = T / num_steps
     activation = config.model.ACTIVATION
     num_hidden = config.model.NUM_HIDDEN
-    if activation == 'linear':
-        activation = mx.gluon.nn.LeakyReLU(1)
     rnn_kwargs = {'num_layers': config.model.NUM_LAYERS,
                   'num_hidden': num_hidden,
                   'activation': activation,
