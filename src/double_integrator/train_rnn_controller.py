@@ -125,9 +125,9 @@ def train_sweep(config):
 
     dfs = []
     config.defrost()
-    mlflow.set_experiment('train_rnn_controller')
     mlflow.set_tracking_uri(
         os.path.join('file:' + config.paths.BASE_PATH, 'mlruns'))
+    mlflow.set_experiment('train_rnn_controller')
     mlflow.start_run(run_name='Noise sweep parent')
     for w, v in tqdm(product(process_noises, observation_noises), 'noise',
                      leave=False):
