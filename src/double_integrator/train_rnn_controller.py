@@ -126,13 +126,11 @@ def train_sweep(config):
     config.defrost()
     mlflow.set_tracking_uri(
         os.path.join('file:' + config.paths.BASE_PATH, 'mlruns'))
-    experiment_id = mlflow.create_experiment('train_rnn_controller')
-    mlflow.start_run(run_name='Noise sweep parent',
-                     experiment_id=experiment_id)
+    mlflow.set_experiment('train_rnn_controller')
+    mlflow.start_run(run_name='Noise sweep parent')
     for w, v in tqdm(product(process_noises, observation_noises), 'noise',
                      leave=False):
-        mlflow.start_run(run_name='Noise sweep child',
-                         experiment_id=experiment_id, nested=True)
+        mlflow.start_run(run_name='Noise sweep child', nested=True)
         path_model = os.path.join(path, get_model_name(filename, w, v))
         config.paths.FILEPATH_MODEL = path_model
         config.process.PROCESS_NOISES = [w]
