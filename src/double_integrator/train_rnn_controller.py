@@ -87,7 +87,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             plt.xlabel('Time')
             plt.ylabel('Control')
             # plt.show()
-            mlflow.log_figure(fig, 'figures/control_{}.png'.format(epoch))
+            mlflow.log_figure(fig, 'figures/control_{}.png'.format(epoch))#
 
         validation_loss = evaluate(model, test_data_loader, loss_function,
                                    hidden_init, context)
@@ -103,7 +103,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
         path_figures = config.paths.PATH_FIGURES
         w = float2str(config.process.PROCESS_NOISES[0])
         v = float2str(config.process.OBSERVATION_NOISES[0])
-        filename = f'training_curve_{w}_{v}.png'
+        filename = f'training_curve_'#{w}_{v}.png'
         path_plot = os.path.join(path_figures, filename)
         plot_training_curve(training_losses, validation_losses, path_plot,
                             show=False)
