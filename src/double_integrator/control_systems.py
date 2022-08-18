@@ -502,13 +502,14 @@ class RNNModel(mx.gluon.HybridBlock):
                                                 input_size=input_size)
             else:
                 self.rnn = mx.gluon.rnn.RNN(num_hidden, num_layers, activation,
-                                            input_size=input_size)
+                                            input_size=input_size,
+                                            prefix='rnn_')
             self.decoder = mx.gluon.nn.Dense(num_outputs, activation='tanh',
                                              in_units=num_hidden,
-                                             flatten=False)
+                                             flatten=False, prefix='decoder_')
 
     # noinspection PyUnusedLocal
-    def hybrid_forward(self, F, x, *args, **kwargs):
+    def hybrid_forward(self, F, x, *args):
         output, hidden = self.rnn(x, args[0])
         decoded = self.decoder(output)
         return decoded, hidden

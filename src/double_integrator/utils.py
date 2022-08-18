@@ -285,6 +285,7 @@ def get_control(data, num_steps):
 
 
 def get_data_loaders(data, config, variable):
+    print("\nPreparing data loaders:")
     num_cpus = max(os.cpu_count() // 2, 1)
     num_steps = config.simulation.NUM_STEPS
     batch_size = config.training.BATCH_SIZE

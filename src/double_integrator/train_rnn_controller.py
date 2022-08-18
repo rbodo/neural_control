@@ -27,15 +27,16 @@ class CombinedRNN(mx.gluon.HybridBlock):
         self.model = model
         self.controller = controller
 
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        controller_output, model_hidden, controller_hidden = args
+    def hybrid_forward(self, F, x, *args):
+        model_hidden, controller_hidden = args
         model_outputs = []
         for model_input in x:
-            model_output, model_hidden = self.model(
-                F.expand_dims(model_input, 0),
-                model_hidden[0] + controller_output)
+            if F is mx.ndarray:
+                model_input = F.expand_dims(model_input, 0)
             controller_output, controller_hidden = self.controller(
-                model_hidden[0], controller_hidden[0])
+                model_hidden[0], controller_hidden)
+            model_output, model_hidden = self.model(
+                model_input, [model_hidden[0] + controller_output])
             model_outputs.append(model_output)
         return F.concat(*model_outputs, dim=0)
 
@@ -76,26 +77,25 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
                                                            'observations')
 
     model = RNNModel(model_num_hidden, model_num_layers, num_outputs,
-                     num_inputs, activation)
+                     num_inputs, activation, prefix='model_')
 
     controller = RNNModel(controller_num_hidden, controller_num_layers,
-                          model_num_hidden, model_num_hidden, activation)
+                          model_num_hidden, model_num_hidden, activation,
+                          prefix='controller_')
 
     combined = CombinedRNN(model, controller)
-    combined.hybridize(active=False)
     combined.initialize(mx.init.Xavier(), context)
-    controller.collect_params().setattr('grad_req', 'null')
+    combined.hybridize(active=True, static_alloc=True, static_shape=True)
+    # controller.collect_params().setattr('grad_req', 'null')
 
     loss_function = mx.gluon.loss.L2Loss()
     trainer = mx.gluon.Trainer(combined.collect_params(), optimizer,
                                {'learning_rate': lr,
                                 'rescale_grad': 1 / batch_size})
 
-    controller_output = mx.nd.zeros((1, batch_size, model_num_hidden),
-                                    ctx=context)
     model_hidden = model.rnn.begin_state(batch_size, ctx=context)
     controller_hidden = controller.rnn.begin_state(batch_size, ctx=context)
-    init = (controller_output, model_hidden, controller_hidden)
+    init = (model_hidden, controller_hidden)
     training_losses = []
     validation_losses = []
     for epoch in trange(num_epochs, desc='epoch'):
