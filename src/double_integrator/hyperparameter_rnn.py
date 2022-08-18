@@ -10,8 +10,7 @@ from mxnet import autograd
 from matplotlib import pyplot as plt
 
 from src.double_integrator import configs
-from src.double_integrator.train_rnn import get_data_loaders
-from src.double_integrator.utils import apply_config
+from src.double_integrator.utils import apply_config, get_data_loaders
 
 
 def create_model(trial):

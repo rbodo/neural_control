@@ -8,9 +8,10 @@ from tqdm import tqdm
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DiRnn
 from src.double_integrator.di_rnn import run_single, add_variables
-from src.double_integrator.train_rnn import get_model_name, get_trajectories
+from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import (RNG, Monitor, select_noise_subset,
-                                         split_train_test, apply_config)
+                                         split_train_test, apply_config,
+                                         get_trajectories)
 
 
 def main(config):

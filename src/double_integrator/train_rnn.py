@@ -3,7 +3,6 @@ import sys
 import time
 from itertools import product
 
-import numpy as np
 import mxnet as mx
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -15,71 +14,11 @@ from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel
 from src.double_integrator.emgr import emgr
 from src.double_integrator.plotting import plot_training_curve, float2str
-from src.double_integrator.utils import (split_train_test, select_noise_subset,
-                                         apply_config)
+from src.double_integrator.utils import apply_config, get_data_loaders
 
 
 def get_model_name(filename, w, v):
     return f'w{w:.4f}_v{v:.4f}' + filename
-
-
-def get_trajectories(data, num_steps, variable: str):
-    if variable == 'estimates':
-        print("Using Kalman-filtered state estimates.")
-        x0 = data[r'$\hat{x}$']
-        x1 = data[r'$\hat{v}$']
-        x0 = np.reshape(x0.to_numpy(), (-1, num_steps))
-        x1 = np.reshape(x1.to_numpy(), (-1, num_steps))
-        x = np.stack([x0, x1], 1)
-    elif variable == 'observations':
-        print("Using noisy partial observations.")
-        x = data['y']
-        x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
-    elif variable == 'states':
-        print("Using states.")
-        x0 = data['x']
-        x1 = data['v']
-        x0 = np.reshape(x0.to_numpy(), (-1, num_steps))
-        x1 = np.reshape(x1.to_numpy(), (-1, num_steps))
-        x = np.stack([x0, x1], 1)
-    else:
-        raise NotImplementedError
-    return x.astype(np.float32)
-
-
-def get_control(data, num_steps):
-    y = data['u']
-    y = np.reshape(y.to_numpy(), (-1, 1, num_steps))
-    return y.astype(np.float32)
-
-
-def get_data_loaders(data, config, variable):
-    num_cpus = max(os.cpu_count() // 2, 1)
-    num_steps = config.simulation.NUM_STEPS
-    batch_size = config.training.BATCH_SIZE
-    validation_fraction = config.training.VALIDATION_FRACTION
-    process_noises = config.process.PROCESS_NOISES
-    observation_noises = config.process.OBSERVATION_NOISES
-
-    data = select_noise_subset(data, process_noises, observation_noises)
-
-    data_train, data_test = split_train_test(data, validation_fraction)
-
-    x_train = get_trajectories(data_train, num_steps, variable)
-    y_train = get_control(data_train, num_steps)
-    x_test = get_trajectories(data_test, num_steps, variable)
-    y_test = get_control(data_test, num_steps)
-
-    train_dataset = mx.gluon.data.dataset.ArrayDataset(x_train, y_train)
-    train_data_loader = mx.gluon.data.DataLoader(
-        train_dataset, batch_size, shuffle=True, num_workers=num_cpus,
-        last_batch='rollover')
-    test_dataset = mx.gluon.data.dataset.ArrayDataset(x_test, y_test)
-    test_data_loader = mx.gluon.data.DataLoader(
-        test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
-        last_batch='discard')
-
-    return test_data_loader, train_data_loader
 
 
 def evaluate(model, test_data_loader, loss_function, hidden_init, context):
