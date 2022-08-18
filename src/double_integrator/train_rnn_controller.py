@@ -15,15 +15,52 @@ from tqdm.contrib import tenumerate
 from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel
 from src.double_integrator.plotting import plot_training_curve
-from src.double_integrator.train_rnn import (get_data_loaders, evaluate)
-from src.double_integrator.utils import get_artifact_path
+from src.double_integrator.utils import get_artifact_path, get_data_loaders
+
+
+class CombinedRNN(mx.gluon.HybridBlock):
+
+    def __init__(self, model: RNNModel, controller: RNNModel, **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.model = model
+        self.controller = controller
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        controller_output, model_hidden, controller_hidden = args
+        model_outputs = []
+        for model_input in x:
+            model_output, model_hidden = self.model(
+                F.expand_dims(model_input, 0),
+                model_hidden[0] + controller_output)
+            controller_output, controller_hidden = self.controller(
+                model_hidden[0], controller_hidden[0])
+            model_outputs.append(model_output)
+        return F.concat(*model_outputs, dim=0)
+
+
+def evaluate(model, test_data_loader, loss_function, init, context):
+    validation_loss = 0
+    for data, label in test_data_loader:
+        data = mx.nd.moveaxis(data, -1, 0)
+        data = data.as_in_context(context)
+        label = label.as_in_context(context)
+        output = model(data, *init)
+        output = mx.nd.moveaxis(output, 0, -1)
+        loss = loss_function(output, label)
+        validation_loss += loss.mean().asscalar()
+    return validation_loss
 
 
 def train_single(config, plot_control=True, plot_loss=True, save_model=True):
     context = mx.gpu(GPU) if mx.context.num_gpus() > 0 else mx.cpu()
+    os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
 
-    num_hidden = config.model.NUM_HIDDEN
-    num_layers = config.model.NUM_LAYERS
+    model_num_hidden = config.model.NUM_HIDDEN
+    model_num_layers = config.model.NUM_LAYERS
+    controller_num_hidden = 40
+    controller_num_layers = 1
     num_inputs = 1
     num_outputs = 1
     activation = config.model.ACTIVATION
@@ -38,24 +75,32 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
     test_data_loader, train_data_loader = get_data_loaders(data, config,
                                                            'observations')
 
-    model = RNNModel(num_hidden, num_layers, num_outputs, num_inputs,
-                     activation)
-    model.hybridize()
-    model.initialize(mx.init.Xavier(), context)
+    model = RNNModel(model_num_hidden, model_num_layers, num_outputs,
+                     num_inputs, activation)
 
-    loss_function = mx.gluon.loss.L2Loss()  # NRMSD()
-    trainer = mx.gluon.Trainer(model.collect_params(), optimizer,
+    controller = RNNModel(controller_num_hidden, controller_num_layers,
+                          model_num_hidden, model_num_hidden, activation)
+
+    combined = CombinedRNN(model, controller)
+    combined.hybridize(active=False)
+    combined.initialize(mx.init.Xavier(), context)
+    controller.collect_params().setattr('grad_req', 'null')
+
+    loss_function = mx.gluon.loss.L2Loss()
+    trainer = mx.gluon.Trainer(combined.collect_params(), optimizer,
                                {'learning_rate': lr,
                                 'rescale_grad': 1 / batch_size})
 
-    hidden_init = mx.nd.zeros((num_layers, batch_size, model.num_hidden),
-                              ctx=context)
+    controller_output = mx.nd.zeros((1, batch_size, model_num_hidden),
+                                    ctx=context)
+    model_hidden = model.rnn.begin_state(batch_size, ctx=context)
+    controller_hidden = controller.rnn.begin_state(batch_size, ctx=context)
+    init = (controller_output, model_hidden, controller_hidden)
     training_losses = []
     validation_losses = []
     for epoch in trange(num_epochs, desc='epoch'):
         training_loss = 0
         label = None
-        output = None
         tic = time.time()
         for batch_idx, (data, label) in tenumerate(train_data_loader,
                                                    desc='batch', leave=False):
@@ -65,7 +110,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             data = data.as_in_context(context)
             label = label.as_in_context(context)
             with autograd.record():
-                output, hidden = model(data, hidden_init)
+                output = combined(data, *init)
                 output = mx.nd.moveaxis(output, 0, -1)
                 loss = loss_function(output, label)
 
@@ -88,8 +133,8 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
             mlflow.log_figure(fig, f'figures/control_{epoch}.png')
             plt.close(fig)
 
-        validation_loss = evaluate(model, test_data_loader, loss_function,
-                                   hidden_init, context)
+        validation_loss = evaluate(combined, test_data_loader, loss_function,
+                                   init, context)
         validation_loss_mean = validation_loss / len(test_data_loader)
         validation_losses.append(validation_loss_mean)
         logging.debug("Epoch {:3} ({:2.1f} s): loss {:.3e}, val loss {:.3e}."
@@ -105,7 +150,7 @@ def train_single(config, plot_control=True, plot_loss=True, save_model=True):
     if save_model:
         path_model = get_artifact_path('models/rnn.params')
         os.makedirs(os.path.dirname(path_model), exist_ok=True)
-        model.save_parameters(path_model)
+        combined.save_parameters(path_model)
         logging.info(f"Saved model to {path_model}.")
 
     return training_losses, validation_losses
