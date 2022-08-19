@@ -21,13 +21,28 @@ from src.ff_pid.brownian import brownian
 
 def plot_control_output(output, label):
     plt.close()
-    fig = plt.figure()
     plt.plot(output[0, 0].asnumpy(), label='RNN')
     plt.plot(label[0, 0].asnumpy(), label='LQR')
     plt.legend()
     plt.xlabel('Time')
     plt.ylabel('Control')
-    return fig
+    return plt.gcf()
+
+
+def plot_weight_histogram(model, atol=1e-6):
+    plt.close()
+    w = model.controller.decoder.weight.data().asnumpy()
+    r = np.count_nonzero(np.isclose(w, 0, atol=atol)) / w.size
+    plt.hist(np.ravel(w), 100, histtype='stepfilled', log=True,
+             label=f'in: {r:.2%} sparsity', align='left')
+    w = model.controller.rnn.l0_i2h_weight.data().asnumpy()
+    r = np.count_nonzero(np.isclose(w, 0, atol=atol)) / w.size
+    plt.hist(np.ravel(w), 100, histtype='stepfilled', log=True,
+             label=f'out: {r:.2%} sparsity', align='right')
+    plt.xlabel('Weight')
+    plt.ylabel('Count')
+    plt.legend()
+    return plt.gcf()
 
 
 class ControlledNeuralSystem(mx.gluon.HybridBlock):
@@ -212,7 +227,7 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
     init = model.begin_state(batch_size, context)
 
     baseline = evaluate(model, data_test, init, context) / len(data_test)
-    logging.info(f'Baseline perturbed and uncontrolled: {baseline:.5f}')
+    mlflow.log_metric('Baseline_perturbed_uncontrolled', baseline)
 
     training_loss_mean = validation_loss_mean = None
     for epoch in trange(config.training.NUM_EPOCHS, desc='epoch'):
@@ -256,6 +271,9 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
         os.makedirs(os.path.dirname(path_model), exist_ok=True)
         model.save_parameters(path_model)
         logging.info(f"Saved model to {path_model}.")
+
+    f = plot_weight_histogram(model)
+    mlflow.log_figure(f, f'figures/weight_distribution.png')
 
     # gramians = Gramians(model, context, dt, T)
     g_c = None#gramians.compute_controllability()
@@ -313,7 +331,7 @@ def main(config):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    GPU = 2
+    GPU = 1
     RNG = np.random.default_rng(42)
 
     _config = configs.config_train_rnn_controller.get_config()

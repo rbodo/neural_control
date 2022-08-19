@@ -23,8 +23,8 @@ def get_config(timestamp_workdir=None):
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
     config.model.NUM_HIDDEN_CONTROLLER = 40
     config.model.NUM_LAYERS_CONTROLLER = 1
-    config.model.REGULARIZATION_LEVELS = [0]
-        # np.logspace(-5, -2, 3, dtype='float32').tolist()
+    config.model.REGULARIZATION_LEVELS = \
+        np.logspace(-5, -3, 3, dtype='float32').tolist()
     config.perturbation = CfgNode()
     config.perturbation.PERTURBATION_TYPES = \
         ['sensor', 'actuator', 'processor']
