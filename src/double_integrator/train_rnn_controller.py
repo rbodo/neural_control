@@ -29,16 +29,21 @@ def plot_control_output(output, label):
     return plt.gcf()
 
 
-def plot_weight_histogram(model, atol=1e-6):
+def plot_weight_histogram(model):
     plt.close()
-    w = model.controller.decoder.weight.data().asnumpy()
-    r = np.count_nonzero(np.isclose(w, 0, atol=atol)) / w.size
-    plt.hist(np.ravel(w), 100, histtype='stepfilled', log=True,
-             label=f'in: {r:.2%} sparsity', align='left')
+
     w = model.controller.rnn.l0_i2h_weight.data().asnumpy()
-    r = np.count_nonzero(np.isclose(w, 0, atol=atol)) / w.size
-    plt.hist(np.ravel(w), 100, histtype='stepfilled', log=True,
-             label=f'out: {r:.2%} sparsity', align='right')
+    r = np.count_nonzero(w) / w.size
+    mlflow.log_metric('observability', r)
+    plt.hist(np.ravel(w), 100, histtype='step', log=True,
+             label=f'observability: {r:.2%}', align='left')
+
+    w = model.controller.decoder.weight.data().asnumpy()
+    r = np.count_nonzero(w) / w.size
+    mlflow.log_metric('controllability', r)
+    plt.hist(np.ravel(w), 100, histtype='step', log=True,
+             label=f'controllability: {r:.2%}', align='right')
+
     plt.xlabel('Weight')
     plt.ylabel('Count')
     plt.legend()
@@ -74,20 +79,30 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
             return
         elif where == 'sensor':
             parameters = self.neuralsystem.rnn.l0_i2h_weight
+            scale = 1
         elif where == 'processor':
             parameters = self.neuralsystem.rnn.l0_h2h_weight
+            scale = 1e-2
         elif where == 'actuator':
             parameters = self.neuralsystem.decoder.weight
+            scale = 1e-3
         else:
             raise NotImplementedError
         shape = parameters.shape
         w = np.ravel(parameters.data().asnumpy())
-        w = brownian(w, 1, dt, delta, drift, None, rng)[0]
+        w = brownian(w, 1, dt, delta, scale * drift, None, rng)[0]
         parameters.data()[:] = np.reshape(w, shape)
 
     def get_reg_weights(self):
         return [self.controller.decoder.weight,
                 self.controller.rnn.l0_i2h_weight]
+
+    def sparsify(self, atol):
+        weight_list = self.get_reg_weights()
+        for weights in weight_list:
+            idxs = np.nonzero(weights.data().abs().asnumpy() < atol)
+            if len(idxs[0]):
+                weights.data()[idxs] = 0
 
 
 class L2L1(mx.gluon.loss.L2Loss):
@@ -207,6 +222,7 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
     delta = config.perturbation.DELTA
     batch_size = config.training.BATCH_SIZE
     path_model = config.paths.FILEPATH_MODEL
+    atol = config.model.SPARSITY_THRESHOLD
 
     model = get_model(config, context, freeze_neuralsystem=True,
                       freeze_controller=False, load_weights_from=path_model)
@@ -249,8 +265,10 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
                                          model.get_reg_weights())
                 else:
                     loss = loss_function(output, label)
+
             loss.backward()
             trainer.step(batch_size)
+            model.sparsify(atol)
             training_loss += loss.mean().asscalar()
 
         training_loss_mean = training_loss / len(data_train)
