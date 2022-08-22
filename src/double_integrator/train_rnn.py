@@ -10,9 +10,9 @@ from mxnet import autograd
 from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 
+from py.emgr import emgr
 from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel
-from src.double_integrator.emgr import emgr
 from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.utils import apply_config, get_data_loaders
 

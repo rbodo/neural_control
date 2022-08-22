@@ -1,5 +1,6 @@
 import os
 
+import mlflow
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -438,3 +439,34 @@ def plot_rnn_gramians(df, path, n=-1, remove_outliers_below=None):
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
     plt.show()
+
+
+def plot_control_output(output, label):
+    plt.close()
+    plt.plot(output[0, 0].asnumpy(), label='RNN')
+    plt.plot(label[0, 0].asnumpy(), label='LQR')
+    plt.legend()
+    plt.xlabel('Time')
+    plt.ylabel('Control')
+    return plt.gcf()
+
+
+def plot_weight_histogram(model):
+    plt.close()
+
+    w = model.controller.rnn.l0_i2h_weight.data().asnumpy()
+    r = np.count_nonzero(w) / w.size
+    mlflow.log_metric('observability', r)
+    plt.hist(np.ravel(w), 100, histtype='step', log=True,
+             label=f'observability: {r:.2%}', align='left')
+
+    w = model.controller.decoder.weight.data().asnumpy()
+    r = np.count_nonzero(w) / w.size
+    mlflow.log_metric('controllability', r)
+    plt.hist(np.ravel(w), 100, histtype='step', log=True,
+             label=f'controllability: {r:.2%}', align='right')
+
+    plt.xlabel('Weight')
+    plt.ylabel('Count')
+    plt.legend()
+    return plt.gcf()

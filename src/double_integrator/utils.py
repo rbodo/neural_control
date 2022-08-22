@@ -10,6 +10,9 @@ import mxnet as mx
 import numpy as np
 import pandas as pd
 
+from py.emgr import emgr
+from src.double_integrator.control_systems import ClosedControlledNeuralSystem
+
 RNG = np.random.default_rng(42)
 
 
@@ -312,3 +315,67 @@ def get_data_loaders(data, config, variable):
         last_batch='discard')
 
     return test_data_loader, train_data_loader
+
+
+class L2L1(mx.gluon.loss.L2Loss):
+    def __init__(self, lambda_: float, context, **kwargs):
+        super().__init__(**kwargs)
+        self.l1 = mx.gluon.loss.L1Loss(lambda_)
+        self.context = context
+
+    def hybrid_forward(self, F, pred, label, weight_list: list = None,
+                       sample_weight=None):
+        l2 = super().hybrid_forward(F, pred, label, sample_weight)
+        if weight_list is not None:
+            for weights in weight_list:
+                l2 = l2 + self.l1(
+                    weights.data(), F.zeros(weights.shape,
+                                            ctx=self.context)).mean()
+        return l2
+
+
+class Gramians(mx.gluon.HybridBlock):
+    def __init__(self, model: ClosedControlledNeuralSystem, context, dt, T,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.model = model
+        self.context = context
+        self.dt = dt
+        self.T = T
+        self.num_inputs = self.model.controller.num_hidden
+        self.num_hidden = self.model.neuralsystem.num_hidden
+        self.num_outputs = self.model.controller.num_hidden
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        environment_states = \
+            self.model.environment.begin_state(1, self.context, F)
+        neuralsystem_states = [args[0]]
+        neuralsystem_output = \
+            F.zeros((1, 1, self.model.environment.num_inputs), self.context)
+        outputs = []
+        for t in np.arange(0, self.T, self.dt):
+            ut = F.array(np.expand_dims(x(t), (0, 1)), self.context)
+            environment_output, environment_states = self.model.environment(
+                environment_states, neuralsystem_output)
+            neuralsystem_output, neuralsystem_states = self.model.neuralsystem(
+                environment_output,
+                [neuralsystem_states[0] + self.model.readin(F, ut)])
+            outputs.append(self.model.readout(F, neuralsystem_states[0]))
+        return F.concat(*outputs, dim=0).reshape((len(outputs), -1)).T
+
+    # noinspection PyUnusedLocal
+    def _ode(self, f, g, t, x0, u, p):
+        x0 = mx.nd.array(np.expand_dims(x0, (0, 1)), self.context)
+        return self.__call__(u, x0).asnumpy()
+
+    def compute_gramian(self, kind):
+        return emgr(None, 1,
+                    [self.num_inputs, self.num_hidden, self.num_outputs],
+                    [self.dt, self.T - self.dt], kind, ode=self._ode,
+                    us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden))
+
+    def compute_controllability(self):
+        return self.compute_gramian('c')
+
+    def compute_observability(self):
+        return self.compute_gramian('o')

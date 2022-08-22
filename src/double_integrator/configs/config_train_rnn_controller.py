@@ -19,6 +19,10 @@ def get_config(timestamp_workdir=None):
     config.process.PROCESS_NOISES = config.process.PROCESS_NOISES[:1]
     config.process.OBSERVATION_NOISES = config.process.OBSERVATION_NOISES[:1]
 
+    config.training.NUM_EPOCHS = 10
+    config.training.BATCH_SIZE = 32
+
+    config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 50
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
     config.model.NUM_HIDDEN_CONTROLLER = 40
