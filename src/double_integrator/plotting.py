@@ -45,16 +45,19 @@ def plot_timeseries(df, path=None):
 
 def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
                        start_points=None, n=10, xt=None, rng=None, path=None,
-                       show=True, xlim=None, ylim=None):
+                       show=True, xlim=None, ylim=None, fig=None,
+                       line_label=None):
+    plt.close()
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
     labels = list(state_dict.keys())
     states = list(state_dict.values())
     i, j = (0, 1)  # np.argsort(labels))
 
-    fig = plt.figure()
+    if fig is None:
+        fig = plt.figure()
 
     # Draw trajectory.
-    plt.plot(states[i], states[j])
+    plt.plot(states[i], states[j], label=line_label)
     plt.xlabel(labels[i])
     plt.ylabel(labels[j])
 

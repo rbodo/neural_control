@@ -610,7 +610,7 @@ class StochasticLinearIOSystemMx(mx.gluon.HybridBlock):
 
 class DIMx(StochasticLinearIOSystemMx):
     def __init__(self, num_inputs, num_outputs, num_states, context, var_x=0,
-                 var_y=0, dt=0.1, dtype='float32', **kwargs):
+                 var_y=0, dt=0.1, dtype='float32', freeze=True, **kwargs):
 
         super().__init__(num_inputs, num_outputs, num_states, context, dt,
                          dtype, **kwargs)
@@ -633,6 +633,8 @@ class DIMx(StochasticLinearIOSystemMx):
             self.V.initialize(ctx=self.context)
             self.V.data()[:] = var_y * mx.nd.eye(self.num_outputs,
                                                  ctx=self.context, dtype=dtype)
+        if freeze:
+            self.collect_params().setattr('grad_req', 'null')
 
 
 class ControlledNeuralSystem(mx.gluon.HybridBlock):

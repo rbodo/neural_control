@@ -38,7 +38,7 @@ def evaluate_closed_loop(model: ClosedControlledNeuralSystem, data_loader,
                          filename):
     loss_function = mx.gluon.loss.L2Loss()
     validation_loss = 0
-    environment_states = None
+    environment_states = data = None
     for data, label in data_loader:
         data = mx.nd.moveaxis(data, -1, 0)
         data = data.as_in_context(model.context)
@@ -49,7 +49,12 @@ def evaluate_closed_loop(model: ClosedControlledNeuralSystem, data_loader,
         validation_loss += loss.mean().asscalar()
     fig = plot_phase_diagram({'x': environment_states[:, 0, 0].asnumpy(),
                               'v': environment_states[:, 0, 1].asnumpy()},
-                             xt=[0, 0], show=False, xlim=[-1, 1], ylim=[-1, 1])
+                             xt=[0, 0], show=False, xlim=[-1, 1], ylim=[-1, 1],
+                             line_label='RNN')
+    fig = plot_phase_diagram({'x': data[:, 0, 0].asnumpy(),
+                              'v': data[:, 0, 1].asnumpy()},
+                             show=False, fig=fig, line_label='LQG')
+    fig.legend()
     mlflow.log_figure(fig, os.path.join('figures', filename))
     return validation_loss / len(data_loader)
 
@@ -69,6 +74,7 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
     neuralsystem = RNNModel(neuralsystem_num_hidden, neuralsystem_num_layers,
                             num_outputs, num_inputs, activation_rnn,
                             activation_decoder, prefix='neuralsystem_')
+    neuralsystem.initialize(mx.init.Xavier(), context)
     if freeze_neuralsystem:
         neuralsystem.collect_params().setattr('grad_req', 'null')
 
@@ -76,12 +82,12 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
                           neuralsystem_num_hidden, neuralsystem_num_hidden,
                           activation_rnn, activation_decoder,
                           prefix='controller_')
+    controller.initialize(mx.init.Zero(), context)
     if freeze_controller:
         controller.collect_params().setattr('grad_req', 'null')
 
     model = ControlledNeuralSystem(neuralsystem, controller, context,
                                    batch_size)
-    model.initialize(mx.init.Xavier(), context)
     model.hybridize(active=True, static_alloc=True, static_shape=True)
 
     if load_weights_from is not None:
@@ -109,18 +115,16 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
         model = get_model(config, context, freeze_neuralsystem=True,
                           freeze_controller=False,
                           load_weights_from=path_model)
-        baseline_label = 'Baseline_perturbed_uncontrolled'
     else:
         model = get_model(config, context, freeze_neuralsystem=False,
                           freeze_controller=True)
-        baseline_label = 'Baseline_unperturbed'
 
     if perturbation_level > 0:
         model.apply_drift(perturbation_type, dt, delta, perturbation_level,
                           rng)
 
     environment = DIMx(1, 1, 2, context, process_noise, observation_noise, dt,
-                       prefix='environment_')
+                       prefix='environment_', freeze=True)
     model_closed = ClosedControlledNeuralSystem(
         environment, model.neuralsystem, model.controller, context, batch_size,
         num_steps)
@@ -135,11 +139,14 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
          'rescale_grad': 1 / batch_size})
 
     logging.info("Computing baseline performances...")
-    baseline = evaluate(model, data_test)
-    mlflow.log_metric(baseline_label, baseline)
-    baseline = evaluate_closed_loop(model_closed, data_test_full_obs,
-                                    'test_trajectory_before_training.png')
-    mlflow.log_metric(baseline_label + '_closed', baseline)
+    test_loss = evaluate_closed_loop(model_closed, data_test_full_obs,
+                                     'test_trajectory_before_training.png')
+    mlflow.log_metric('test_loss', test_loss, 0)
+    if is_perturbed:
+        # Initialize controller to non-zero weights only after computing
+        # baseline accuracy of perturbed network before training. Otherwise the
+        # untrained controller output will degrade accuracy further.
+        model.controller.initialize(mx.init.Xavier(), context)
 
     logging.info("Training...")
     training_loss = validation_loss = None
@@ -193,7 +200,7 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
     logging.info("Computing test performance...")
     test_loss = evaluate_closed_loop(model_closed, data_test_full_obs,
                                      'test_trajectory_after_training.png')
-    mlflow.log_metric('test_loss', test_loss)
+    mlflow.log_metric('test_loss', test_loss, 1)
 
     if is_perturbed:
         logging.info("Computing Gramians...")
@@ -230,10 +237,10 @@ def main(config):
     out = train(config, None, 0, 0, data_train, data_test, data_test_full_obs,
                 context)
     dfs.append(out)
-    _config.defrost()
-    _config.paths.FILEPATH_MODEL = get_artifact_path('models/rnn.params')
+    config.defrost()
+    config.paths.FILEPATH_MODEL = get_artifact_path('models/rnn.params')
     with open(get_artifact_path('config.txt'), 'w') as f:
-        f.write(_config.dump())
+        f.write(config.dump())
     for perturbation_type in tqdm(perturbation_types, 'perturbation_type',
                                   leave=False):
         mlflow.start_run(run_name='Perturbation type', nested=True)
@@ -261,7 +268,7 @@ def main(config):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    GPU = 1
+    GPU = 2
     EXPERIMENT_NAME = 'train_rnn_controller'
 
     _config = configs.config_train_rnn_controller.get_config()

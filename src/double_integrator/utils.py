@@ -2,7 +2,7 @@ import os
 import time
 from collections import OrderedDict
 from itertools import product
-from typing import Tuple
+from typing import Tuple, TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
 import mlflow
@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 
 from py.emgr import emgr
-from src.double_integrator.control_systems import ClosedControlledNeuralSystem
+if TYPE_CHECKING:
+    from src.double_integrator.control_systems import \
+        ClosedControlledNeuralSystem
 
 RNG = np.random.default_rng(42)
 
@@ -335,7 +337,7 @@ class L2L1(mx.gluon.loss.L2Loss):
 
 
 class Gramians(mx.gluon.HybridBlock):
-    def __init__(self, model: ClosedControlledNeuralSystem, context, dt, T,
+    def __init__(self, model: 'ClosedControlledNeuralSystem', context, dt, T,
                  **kwargs):
         super().__init__(**kwargs)
         self.model = model
