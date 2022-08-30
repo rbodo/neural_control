@@ -543,13 +543,13 @@ class StochasticLinearIOSystemMx(mx.gluon.HybridBlock):
         self.num_outputs = num_outputs
         self.num_states = num_states
         self.context = context
-        self.dt = dt
         self.dtype = dtype
 
         with self.name_scope():
             specs = dict(grad_req='null', init=mx.init.Zero(),
                          dtype=self.dtype, allow_deferred_init=True,
                          differentiable=False)
+            self.dt = self.params.get('dt', shape=(1,), **specs)
             self.A = self.params.get(
                 'A', shape=(self.num_states, self.num_states), **specs)
             self.B = self.params.get(
@@ -561,56 +561,64 @@ class StochasticLinearIOSystemMx(mx.gluon.HybridBlock):
             self.W = None
             self.V = None
         self.initialize(mx.init.Zero(), self.context)
+        self.dt.data()[:] = dt
 
     def begin_state(self, batch_size, context, F):
-        return F.zeros((batch_size, self.num_states), context)
+        return F.zeros((1, batch_size, self.num_states), ctx=context)
 
-    def step(self, F, x, u, method, deterministic):
-        dxdt = self.dynamics(F, x, u)
-        x = self.integrate(F, x, dxdt, method)
-        return self.add_process_noise(F, x, deterministic)
+    def step(self, F, x, u, **kwargs):
+        dxdt = self.dynamics(F, x, u, **kwargs)
+        x = self.integrate(F, x, dxdt, **kwargs)
+        return self.add_process_noise(F, x, **kwargs)
 
-    def dynamics(self, F, x, u):
-        return F.dot(x, self.A.data().T) + F.dot(u, self.B.data().T)
+    @staticmethod
+    def dynamics(F, x, u, **kwargs):
+        return F.elemwise_add(F.dot(x, F.transpose(kwargs['A'])),
+                              F.dot(u, F.transpose(kwargs['B'])))
 
-    def integrate(self, F, x, dxdt, method='euler-maruyama'):
-        if method == 'euler-maruyama':
-            return x + self.dt * dxdt
+    def integrate(self, F, x, dxdt, **kwargs):
+        method = kwargs.get('method', 'euler-maruyama')
+        if method == 'euler-maruyama':  # x + dt * dx/dt
+            return F.elemwise_add(x, F.broadcast_mul(kwargs['dt'], dxdt))
         else:
             raise NotImplementedError
 
-    def add_process_noise(self, F, x, deterministic):
-        if self.W is None or deterministic:
+    def add_process_noise(self, F, x, **kwargs):
+        W = kwargs.pop('W', None)
+        if W is None or kwargs.get('deterministic', False):
             return x
         dW = self.get_additive_white_gaussian_noise(
-            F.eye(self.num_states, ctx=self.context) *
-            F.sqrt(F.array([self.dt], self.context)))
-        return x + F.dot(self.W.data(), dW)
+            F, self.num_states,
+            F.broadcast_mul(F.ones(self.num_states, ctx=self.context),
+                            F.sqrt(kwargs['dt'])))
+        return F.broadcast_add(x, F.dot(W, dW))
 
-    def output(self, F, x, u, deterministic):
-        y = F.dot(x, self.C.data().T) + F.dot(u, self.D.data().T)
-        return self.add_observation_noise(F, y, deterministic)
+    def output(self, F, x, u, **kwargs):
+        y = F.elemwise_add(F.dot(x, F.transpose(kwargs['C'])),
+                           F.dot(u, F.transpose(kwargs['D'])))
+        return self.add_observation_noise(F, y, **kwargs)
 
-    def add_observation_noise(self, F, y, deterministic):
-        if self.V is None or deterministic:
+    def add_observation_noise(self, F, y, **kwargs):
+        V = kwargs.pop('V', None)
+        if V is None or kwargs.get('deterministic', False):
             return y
-        return y + self.get_additive_white_gaussian_noise(self.V.data())
+        return F.broadcast_add(
+            y, self.get_additive_white_gaussian_noise(F, self.num_outputs,
+                                                      F.diag(V)))
 
-    def get_additive_white_gaussian_noise(self, scale):
-        return mx.random.normal(mx.nd.zeros(len(scale), self.context),
-                                mx.nd.diag(scale), dtype=self.dtype)
+    def get_additive_white_gaussian_noise(self, F, n, scale):
+        return F.sample_normal(F.zeros(n, ctx=self.context), scale,
+                               dtype=self.dtype)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         u = args[0]
-        deterministic = kwargs.get('deterministic', False)
-        x = self.step(F, x, u, kwargs.get('method', 'euler-maruyama'),
-                      deterministic)
-        return self.output(F, x, u, deterministic), x
+        x = self.step(F, x, u, **kwargs)
+        return self.output(F, x, u, **kwargs), x
 
 
 class DIMx(StochasticLinearIOSystemMx):
     def __init__(self, num_inputs, num_outputs, num_states, context, var_x=0,
-                 var_y=0, dt=0.1, dtype='float32', freeze=True, **kwargs):
+                 var_y=0, dt=0.1, dtype='float32', **kwargs):
 
         super().__init__(num_inputs, num_outputs, num_states, context, dt,
                          dtype, **kwargs)
@@ -633,8 +641,6 @@ class DIMx(StochasticLinearIOSystemMx):
             self.V.initialize(ctx=self.context)
             self.V.data()[:] = var_y * mx.nd.eye(self.num_outputs,
                                                  ctx=self.context, dtype=dtype)
-        if freeze:
-            self.collect_params().setattr('grad_req', 'null')
 
 
 class ControlledNeuralSystem(mx.gluon.HybridBlock):
@@ -720,7 +726,7 @@ class ClosedControlledNeuralSystem(ControlledNeuralSystem):
         environment_states = x
         neuralsystem_output = \
             F.zeros((1, self.batch_size, self.environment.num_inputs),
-                    self.context)
+                    ctx=self.context)
         neuralsystem_outputs = []
         environment_state_list = []
         for _ in range(self.num_steps):
