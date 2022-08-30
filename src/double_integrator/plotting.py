@@ -47,13 +47,14 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
                        start_points=None, n=10, xt=None, rng=None, path=None,
                        show=True, xlim=None, ylim=None, fig=None,
                        line_label=None):
-    plt.close()
+
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
     labels = list(state_dict.keys())
     states = list(state_dict.values())
     i, j = (0, 1)  # np.argsort(labels))
 
     if fig is None:
+        plt.close()
         fig = plt.figure()
 
     # Draw trajectory.
@@ -446,16 +447,18 @@ def plot_rnn_gramians(df, path, n=-1, remove_outliers_below=None):
 
 def plot_control_output(output, label):
     plt.close()
+    fig = plt.figure()
     plt.plot(output[0, 0].asnumpy(), label='RNN')
     plt.plot(label[0, 0].asnumpy(), label='LQR')
     plt.legend()
     plt.xlabel('Time')
     plt.ylabel('Control')
-    return plt.gcf()
+    return fig
 
 
 def plot_weight_histogram(model):
     plt.close()
+    fig = plt.figure()
 
     w = model.controller.rnn.l0_i2h_weight.data().asnumpy()
     r = np.count_nonzero(w) / w.size
@@ -472,4 +475,4 @@ def plot_weight_histogram(model):
     plt.xlabel('Weight')
     plt.ylabel('Count')
     plt.legend()
-    return plt.gcf()
+    return fig
