@@ -127,7 +127,7 @@ class MLP:
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
-        self.model = MLPModel(**model_kwargs)
+        self.model = MlpModel(**model_kwargs)
         self.model.hybridize()
         if path_model is None:
             self.model.initialize()
@@ -172,7 +172,7 @@ class RNN:
         self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
         self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
-        self.model = RNNModel(**model_kwargs)
+        self.model = RnnModel(**model_kwargs)
         self.model.hybridize()
         if path_model is None:
             self.model.initialize(ctx=self.context)
@@ -230,7 +230,7 @@ class PidRnn:
         self.pid = PID(k_p=k_p, k_i=k_i, k_d=k_d)
 
     def get_model(self):
-        model = RNNModel(**self.model_kwargs)
+        model = RnnModel(**self.model_kwargs)
         model.hybridize()
         if self.path_model is None:
             model.initialize(ctx=self.context)
@@ -485,7 +485,7 @@ class DiLqeRnn(LqeRnn):
         super().__init__(process, q, r, path_model, model_kwargs)
 
 
-class RNNModel(mx.gluon.HybridBlock):
+class RnnModel(mx.gluon.HybridBlock):
 
     def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
                  activation_rnn=None, activation_decoder=None, **kwargs):
@@ -515,7 +515,7 @@ class RNNModel(mx.gluon.HybridBlock):
         return decoded, hidden
 
 
-class MLPModel(mx.gluon.HybridBlock):
+class MlpModel(mx.gluon.HybridBlock):
 
     def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
 
@@ -644,7 +644,7 @@ class DIMx(StochasticLinearIOSystemMx):
 
 class ControlledNeuralSystem(mx.gluon.HybridBlock):
 
-    def __init__(self, neuralsystem: RNNModel, controller: RNNModel, context,
+    def __init__(self, neuralsystem: RnnModel, controller: RnnModel, context,
                  batch_size, **kwargs):
         super().__init__(**kwargs)
         self.neuralsystem = neuralsystem
@@ -708,8 +708,8 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
 
 
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
-    def __init__(self, environment: DIMx, neuralsystem: RNNModel,
-                 controller: RNNModel, context, batch_size, num_steps: int,
+    def __init__(self, environment: DIMx, neuralsystem: RnnModel,
+                 controller: RnnModel, context, batch_size, num_steps: int,
                  **kwargs):
         super().__init__(neuralsystem, controller, context, batch_size,
                          **kwargs)

@@ -12,7 +12,7 @@ from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import RNNModel, DIMx, \
+from src.double_integrator.control_systems import RnnModel, DIMx, \
     ClosedControlledNeuralSystem
 from src.double_integrator.plotting import plot_phase_diagram, \
     plot_control_output
@@ -67,7 +67,7 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
                        process_noise, observation_noise, dt,
                        prefix='environment_')
 
-    neuralsystem = RNNModel(neuralsystem_num_hidden, neuralsystem_num_layers,
+    neuralsystem = RnnModel(neuralsystem_num_hidden, neuralsystem_num_layers,
                             num_outputs, num_inputs, activation_rnn,
                             activation_decoder, prefix='neuralsystem_')
     if load_weights_from is None:
@@ -75,7 +75,7 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
     if freeze_neuralsystem:
         neuralsystem.collect_params().setattr('grad_req', 'null')
 
-    controller = RNNModel(controller_num_hidden, controller_num_layers,
+    controller = RnnModel(controller_num_hidden, controller_num_layers,
                           neuralsystem_num_hidden, neuralsystem_num_hidden,
                           activation_rnn, activation_decoder,
                           prefix='controller_')

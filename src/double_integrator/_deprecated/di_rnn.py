@@ -8,7 +8,7 @@ import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator._deprecated.di_open import DI
-from src.double_integrator.control_systems import RNNModel
+from src.double_integrator.control_systems import RnnModel
 from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, rnn_controller_output,
@@ -29,7 +29,7 @@ class DiRnn(DI):
         # Observation noise:
         self.V = var_y * np.eye(self.n_y_process)
 
-        self.rnn = RNNModel(num_hidden, num_layers, self.n_y_control,
+        self.rnn = RnnModel(num_hidden, num_layers, self.n_y_control,
                             self.n_u_control)
         # self.rnn.hybridize()
         if path_model is None:

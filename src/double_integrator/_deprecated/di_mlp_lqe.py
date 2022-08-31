@@ -7,7 +7,7 @@ import numpy as np
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator._deprecated.di_lqg import DiLqg
-from src.double_integrator.control_systems import MLPModel
+from src.double_integrator.control_systems import MlpModel
 from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, mlp_controller_output, lqe_dynamics,
@@ -20,7 +20,7 @@ class DiMlpLqe(DiLqg):
                  path_model=None):
         super().__init__(q, r, var_x, var_y)
 
-        self.mlp = MLPModel(num_hidden)
+        self.mlp = MlpModel(num_hidden)
         # self.mlp.hybridize()
         if path_model is None:
             self.mlp.initialize()

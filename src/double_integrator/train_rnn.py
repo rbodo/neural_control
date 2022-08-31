@@ -12,7 +12,7 @@ from tqdm.contrib import tenumerate
 
 from py.emgr import emgr
 from src.double_integrator import configs
-from src.double_integrator.control_systems import RNNModel
+from src.double_integrator.control_systems import RnnModel
 from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.utils import apply_config, get_data_loaders
 
@@ -86,7 +86,7 @@ def train_single(config, verbose=True, plot_control=True, plot_loss=True,
     test_data_loader, train_data_loader = get_data_loaders(data, config,
                                                            'observations')
 
-    model = RNNModel(num_hidden, num_layers, num_outputs, num_inputs,
+    model = RnnModel(num_hidden, num_layers, num_outputs, num_inputs,
                      activation)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)

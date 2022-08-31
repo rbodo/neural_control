@@ -7,7 +7,7 @@ import numpy as np
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator._deprecated.di_open import DI
-from src.double_integrator.control_systems import MLPModel
+from src.double_integrator.control_systems import MlpModel
 from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, mlp_controller_output)
@@ -23,7 +23,7 @@ class DiMlp(DI):
         # Observation noise:
         self.V = var_y * np.eye(self.n_y_process)
 
-        self.mlp = MLPModel(num_hidden)
+        self.mlp = MlpModel(num_hidden)
         # self.mlp.hybridize()
         if path_model is None:
             self.mlp.initialize()

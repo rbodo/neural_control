@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import MLPModel
+from src.double_integrator.control_systems import MlpModel
 from src.double_integrator.utils import apply_config
 
 
@@ -51,7 +51,7 @@ def main():
         test_dataset, batch_size, shuffle=False, num_workers=num_cpus,
         last_batch='discard')
 
-    model = MLPModel(num_hidden, num_outputs)
+    model = MlpModel(num_hidden, num_outputs)
     model.hybridize()
     model.initialize(mx.init.Xavier(), context)
     # model.load_parameters(config.paths.PATH_MODEL, ctx=context)
