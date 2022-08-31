@@ -135,9 +135,9 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
         model = get_model(config, context, freeze_neuralsystem=False,
                           freeze_controller=True)
 
-    if perturbation_level > 0:
-        model.apply_drift(perturbation_type, dt, delta, perturbation_level,
-                          rng)
+    rng = np.random.default_rng(config.SEED)
+    if is_perturbed and perturbation_level > 0:
+        model.add_noise(perturbation_type, perturbation_level, dt, rng)
 
     Q = q * mx.nd.eye(model.environment.num_states, ctx=context)
     R = r * mx.nd.eye(model.environment.num_inputs, ctx=context)

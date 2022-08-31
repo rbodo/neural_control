@@ -4,7 +4,6 @@ import numpy as np
 
 from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
                                          get_additive_white_gaussian_noise)
-from src.ff_pid.brownian import brownian
 from src.ff_pid.pid import PID
 
 
@@ -681,24 +680,20 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
         return (self.neuralsystem.rnn.begin_state(**kwargs),
                 self.controller.rnn.begin_state(**kwargs))
 
-    def apply_drift(self, where, dt, delta, drift, rng):
+    def add_noise(self, where, sigma, dt, rng: np.random.Generator):
         if where in (None, 'None', 'none', ''):
             return
         elif where == 'sensor':
             parameters = self.neuralsystem.rnn.l0_i2h_weight
-            scale = 1
         elif where == 'processor':
             parameters = self.neuralsystem.rnn.l0_h2h_weight
-            scale = 1e-1
         elif where == 'actuator':
             parameters = self.neuralsystem.decoder.weight
-            scale = 1e-2
         else:
             raise NotImplementedError
-        shape = parameters.shape
-        w = np.ravel(parameters.data().asnumpy())
-        w = brownian(w, 1, dt, delta, scale * drift, None, rng)[0]
-        parameters.data()[:] = np.reshape(w, shape)
+        w = parameters.data().asnumpy()
+        noise = rng.standard_normal(w.shape) * sigma * np.sqrt(dt)
+        parameters.data()[:] = w + noise
 
     def get_reg_weights(self):
         return [self.controller.decoder.weight,
