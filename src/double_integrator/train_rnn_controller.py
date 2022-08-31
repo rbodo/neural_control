@@ -285,7 +285,8 @@ def main(config):
                     out = train(config, perturbation_type, perturbation_level,
                                 dropout_probability, data_train, data_test,
                                 context)
-                dfs.append(out)
+                    dfs.append(out)
+                    mlflow.end_run()
                 mlflow.end_run()
             mlflow.end_run()
         mlflow.end_run()
