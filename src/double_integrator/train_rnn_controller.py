@@ -15,7 +15,7 @@ from src.double_integrator import configs
 from src.double_integrator.control_systems import RNNModel, DIMx, \
     ClosedControlledNeuralSystem
 from src.double_integrator.plotting import plot_phase_diagram, \
-    plot_control_output, plot_weight_histogram
+    plot_control_output
 from src.double_integrator.utils import get_artifact_path, get_data_loaders, \
     Gramians
 
@@ -115,13 +115,28 @@ class LQRLoss(mx.gluon.loss.Loss):
             return F.mean(loss, axis=self._batch_axis, exclude=True)
 
 
-def train(config, perturbation_type, perturbation_level, regularization_level,
+class Masker:
+    def __init__(self, model: ClosedControlledNeuralSystem, p,
+                 rng: np.random.Generator):
+        self.model = model
+        self.p = p
+        n = self.model.neuralsystem.num_hidden
+        self._controllability_mask = np.nonzero(rng.binomial(1, self.p, n))
+        self._observability_mask = np.nonzero(rng.binomial(1, self.p, n))
+
+    def apply_mask(self):
+        if self.p == 0:
+            return
+        self.model.controller.decoder.weight.data()[
+            self._controllability_mask] = 0
+        self.model.controller.rnn.l0_i2h_weight.data()[
+            :, self._observability_mask] = 0
+
+
+def train(config, perturbation_type, perturbation_level, dropout_probability,
           data_train, data_test, context, plot_control=True, save_model=True):
-    rng = np.random.default_rng(config.SEED)
     T = config.simulation.T
-    num_steps = config.simulation.NUM_STEPS
-    dt = T / num_steps
-    delta = config.perturbation.DELTA
+    dt = T / config.simulation.NUM_STEPS
     q = config.controller.cost.lqr.Q
     r = config.controller.cost.lqr.R
 
@@ -142,10 +157,6 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
     Q = q * mx.nd.eye(model.environment.num_states, ctx=context)
     R = r * mx.nd.eye(model.environment.num_inputs, ctx=context)
     loss_function = LQRLoss(dt, Q=Q, R=R)
-    trainer = mx.gluon.Trainer(
-        model.collect_params(), config.training.OPTIMIZER,
-        {'learning_rate': config.training.LEARNING_RATE,
-         'rescale_grad': 1 / model.batch_size})
 
     logging.info("Computing baseline performances...")
     test_loss = evaluate(model, data_train, loss_function)
@@ -159,6 +170,14 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
         # untrained controller output will degrade accuracy further.
         model.controller.initialize(mx.init.Xavier(), context,
                                     force_reinit=True)
+
+    trainer = mx.gluon.Trainer(
+        model.collect_params(), config.training.OPTIMIZER,
+        {'learning_rate': config.training.LEARNING_RATE,
+         'rescale_grad': 1 / model.batch_size})
+
+    masker = Masker(model, dropout_probability, rng)
+    masker.apply_mask()
 
     logging.info("Training...")
     training_loss = test_loss = None
@@ -181,6 +200,7 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
 
             loss.backward()
             trainer.step(model.batch_size)
+            masker.apply_mask()
             training_loss += loss.mean().asscalar()
 
         training_loss /= len(data_train)
@@ -203,22 +223,21 @@ def train(config, perturbation_type, perturbation_level, regularization_level,
         logging.info(f"Saved model to {path_model}.")
 
     if is_perturbed:
-        f = plot_weight_histogram(model)
-        mlflow.log_figure(f, f'figures/weight_distribution.png')
-
-    if is_perturbed:
         logging.info("Computing Gramians...")
         gramians = Gramians(model, context, dt, T)
         g_c = gramians.compute_controllability()
         g_o = gramians.compute_observability()
+        g_c_eig = np.linalg.eig(g_c)
+        g_o_eig = np.linalg.eig(g_o)
+        mlflow.log_metrics({'controllability': np.prod(g_c_eig[0]).item(),
+                            'observability': np.prod(g_o_eig[0]).item()})
     else:
         g_c = g_o = None
 
     return {'perturbation_type': perturbation_type,
             'perturbation_level': perturbation_level,
-            'regularization_level': regularization_level,
-            'training_loss': training_loss,
-            'validation_loss': test_loss,
+            'dropout_probability': dropout_probability,
+            'training_loss': training_loss, 'test_loss': test_loss,
             'controllability': g_c, 'observability': g_o}
 
 
@@ -227,7 +246,7 @@ def main(config):
     os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
     perturbation_types = config.perturbation.PERTURBATION_TYPES
     perturbation_levels = config.perturbation.PERTURBATION_LEVELS
-    regularization_levels = config.model.REGULARIZATION_LEVELS
+    dropout_probabilities = config.perturbation.DROPOUT_PROBABILITIES
     path_data = config.paths.FILEPATH_INPUT_DATA
     data = pd.read_pickle(path_data)
     data_test, data_train = get_data_loaders(data, config, 'states')
@@ -251,13 +270,12 @@ def main(config):
                                        'perturbation_level', leave=False):
             mlflow.start_run(run_name='Perturbation level', nested=True)
             mlflow.log_param('perturbation_level', perturbation_level)
-            for regularization_level in tqdm(regularization_levels,
-                                             'regularization_level',
-                                             leave=False):
-                mlflow.start_run(run_name='Regularization level', nested=True)
-                mlflow.log_param('regularization_level', regularization_level)
+            for dropout_probability in tqdm(
+                    dropout_probabilities, 'dropout_probability', leave=False):
+                mlflow.start_run(run_name='Dropout probability', nested=True)
+                mlflow.log_param('dropout_probability', dropout_probability)
                 out = train(config, perturbation_type, perturbation_level,
-                            regularization_level, data_train, data_test,
+                            dropout_probability, data_train, data_test,
                             context)
                 dfs.append(out)
                 mlflow.end_run()

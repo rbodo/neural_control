@@ -1,6 +1,5 @@
 import os
 
-import numpy as np
 from yacs.config import CfgNode
 
 from src.double_integrator import configs
@@ -27,15 +26,11 @@ def get_config(timestamp_workdir=None):
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
     config.model.NUM_HIDDEN_CONTROLLER = 40
     config.model.NUM_LAYERS_CONTROLLER = 1
-    config.model.REGULARIZATION_LEVELS = \
-        np.logspace(-6, -4, 3, dtype='float32').tolist()
-    config.model.SPARSITY_THRESHOLD = 1e-4
 
     config.perturbation = CfgNode()
     config.perturbation.PERTURBATION_TYPES = \
         ['sensor', 'actuator', 'processor']
-    config.perturbation.PERTURBATION_LEVELS = \
-        np.logspace(-2, -1, 3, dtype='float32').tolist()
-    config.perturbation.DELTA = 1e-5
+    config.perturbation.PERTURBATION_LEVELS = [0.1, 0.5, 1]
+    config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
 
     return config
