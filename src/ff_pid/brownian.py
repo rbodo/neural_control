@@ -69,7 +69,7 @@ def brownian(x0, n, dt, delta, drift=0, out=None, rng=None):
 
     # If `out` was not given, create an output array.
     if out is None:
-        out = np.empty(r.shape)
+        out = np.zeros_like(r)
 
     # This computes the Brownian motion by forming the cumulative sum of
     # the random samples.
