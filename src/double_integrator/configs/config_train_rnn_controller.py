@@ -33,4 +33,6 @@ def get_config(timestamp_workdir=None):
     config.perturbation.PERTURBATION_LEVELS = [0.1, 0.5, 1]
     config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
 
+    config.SEEDS = [42, 234]
+
     return config

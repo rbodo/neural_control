@@ -139,6 +139,10 @@ def train(config, perturbation_type, perturbation_level, dropout_probability,
     dt = T / config.simulation.NUM_STEPS
     q = config.controller.cost.lqr.Q
     r = config.controller.cost.lqr.R
+    seed = config.SEED
+    mx.random.seed(seed)
+    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
     if is_perturbed:
@@ -150,7 +154,6 @@ def train(config, perturbation_type, perturbation_level, dropout_probability,
         model = get_model(config, context, freeze_neuralsystem=False,
                           freeze_controller=True)
 
-    rng = np.random.default_rng(config.SEED)
     if is_perturbed and perturbation_level > 0:
         model.add_noise(perturbation_type, perturbation_level, dt, rng)
 
@@ -247,6 +250,7 @@ def main(config):
     perturbation_types = config.perturbation.PERTURBATION_TYPES
     perturbation_levels = config.perturbation.PERTURBATION_LEVELS
     dropout_probabilities = config.perturbation.DROPOUT_PROBABILITIES
+    seeds = config.SEEDS
     path_data = config.paths.FILEPATH_INPUT_DATA
     data = pd.read_pickle(path_data)
     data_test, data_train = get_data_loaders(data, config, 'states')
@@ -274,9 +278,13 @@ def main(config):
                     dropout_probabilities, 'dropout_probability', leave=False):
                 mlflow.start_run(run_name='Dropout probability', nested=True)
                 mlflow.log_param('dropout_probability', dropout_probability)
-                out = train(config, perturbation_type, perturbation_level,
-                            dropout_probability, data_train, data_test,
-                            context)
+                for seed in tqdm(seeds, 'seed', leave=False):
+                    config.SEED = seed
+                    mlflow.start_run(run_name='seed', nested=True)
+                    mlflow.log_param('seed', seed)
+                    out = train(config, perturbation_type, perturbation_level,
+                                dropout_probability, data_train, data_test,
+                                context)
                 dfs.append(out)
                 mlflow.end_run()
             mlflow.end_run()
