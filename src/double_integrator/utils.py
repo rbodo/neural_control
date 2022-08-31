@@ -347,6 +347,7 @@ class Gramians(mx.gluon.HybridBlock):
         self.num_inputs = self.model.controller.num_hidden
         self.num_hidden = self.model.neuralsystem.num_hidden
         self.num_outputs = self.model.controller.num_hidden
+        self._return_observations = None
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         environment_states = \
@@ -362,7 +363,10 @@ class Gramians(mx.gluon.HybridBlock):
             neuralsystem_output, neuralsystem_states = self.model.neuralsystem(
                 environment_output,
                 [neuralsystem_states[0] + self.model.readin(F, ut)])
-            outputs.append(self.model.readout(F, neuralsystem_states[0]))
+            if self._return_observations:
+                outputs.append(self.model.readout(F, neuralsystem_states[0]))
+            else:
+                outputs.append(neuralsystem_states[0])
         return F.concat(*outputs, dim=0).reshape((len(outputs), -1)).T
 
     # noinspection PyUnusedLocal
@@ -377,7 +381,9 @@ class Gramians(mx.gluon.HybridBlock):
                     us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden))
 
     def compute_controllability(self):
+        self._return_observations = False
         return self.compute_gramian('c')
 
     def compute_observability(self):
+        self._return_observations = True
         return self.compute_gramian('o')
