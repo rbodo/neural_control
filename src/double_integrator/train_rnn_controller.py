@@ -47,9 +47,12 @@ def evaluate(model: ClosedControlledNeuralSystem, data_loader, loss_function,
 
 def get_model(config, context, freeze_neuralsystem, freeze_controller,
               load_weights_from: str = None):
-    neuralsystem_num_hidden = config.model.NUM_HIDDEN_NEURALSYSTEM
+    environment_num_states = 2
+    environment_num_outputs = 2
+    neuralsystem_num_states = config.model.NUM_HIDDEN_NEURALSYSTEM
     neuralsystem_num_layers = config.model.NUM_LAYERS_NEURALSYSTEM
-    controller_num_hidden = config.model.NUM_HIDDEN_CONTROLLER
+    neuralsystem_num_outputs = 1
+    controller_num_states = config.model.NUM_HIDDEN_CONTROLLER
     controller_num_layers = config.model.NUM_LAYERS_CONTROLLER
     activation_rnn = config.model.ACTIVATION
     activation_decoder = None  # Defaults to 'linear'
@@ -59,24 +62,22 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
     T = config.simulation.T
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
-    num_inputs = 1
-    num_outputs = 1
-    num_states = 2
 
-    environment = DIMx(num_inputs, num_outputs, num_states, context,
-                       process_noise, observation_noise, dt,
-                       prefix='environment_')
+    environment = DIMx(neuralsystem_num_outputs, environment_num_outputs,
+                       environment_num_states, context, process_noise,
+                       observation_noise, dt, prefix='environment_')
 
-    neuralsystem = RnnModel(neuralsystem_num_hidden, neuralsystem_num_layers,
-                            num_outputs, num_inputs, activation_rnn,
-                            activation_decoder, prefix='neuralsystem_')
+    neuralsystem = RnnModel(neuralsystem_num_states, neuralsystem_num_layers,
+                            neuralsystem_num_outputs, environment_num_outputs,
+                            activation_rnn, activation_decoder,
+                            prefix='neuralsystem_')
     if load_weights_from is None:
         neuralsystem.initialize(mx.init.Xavier(), context)
     if freeze_neuralsystem:
         neuralsystem.collect_params().setattr('grad_req', 'null')
 
-    controller = RnnModel(controller_num_hidden, controller_num_layers,
-                          neuralsystem_num_hidden, neuralsystem_num_hidden,
+    controller = RnnModel(controller_num_states, controller_num_layers,
+                          neuralsystem_num_states, neuralsystem_num_states,
                           activation_rnn, activation_decoder,
                           prefix='controller_')
     if load_weights_from is None:
