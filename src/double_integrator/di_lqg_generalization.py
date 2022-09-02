@@ -9,9 +9,9 @@ from tqdm.contrib import tzip
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DiLqg
 from src.double_integrator.plotting import create_plots
-from src.double_integrator.utils import RNG, Monitor, apply_config
-from src.double_integrator.di_lqg import (run_single, jitter, add_variables,
-                                          get_grid)
+from src.double_integrator.di_lqg import run_single, add_variables
+from src.double_integrator.utils import (RNG, Monitor, apply_config, get_grid,
+                                         jitter)
 
 
 if TYPE_CHECKING:

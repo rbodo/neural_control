@@ -6,22 +6,21 @@ from gym.wrappers import TimeLimit
 from tqdm.contrib import tzip
 from yacs.config import CfgNode
 
-import src.double_integrator.utils
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DiLqg
-from src.double_integrator.di_lqg import jitter, get_grid
 from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.plotting import plot_cost, plot_trajectories
 from src.double_integrator.ppo_recurrent import MlpRnnPolicy, RecurrentPPO
 from src.double_integrator.train_rnn_ppo import DoubleIntegrator, eval_rnn
-from src.double_integrator.utils import apply_config, RNG, Monitor
+from src.double_integrator.utils import apply_config, RNG, Monitor, get_grid, \
+    jitter
 
 
 def run_lqg(system, times, monitor, inits):
     x = inits['x']
     x_est = inits['x_est']
     Sigma = inits['Sigma']
-    u = src.double_integrator.utils.get_control(x_est)
+    u = system.control.get_control(x_est)
     y = system.process.output(0, x, u)
     c = system.control.get_cost(x, u)
 

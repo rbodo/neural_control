@@ -8,12 +8,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DI
-from src.double_integrator.di_lqg import get_grid, jitter
 from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.lqr_rnn_reinforce import RNN
 from src.double_integrator.plotting import plot_training_curve, float2str, \
     plot_phase_diagram
-from src.double_integrator.utils import apply_config, Monitor
+from src.double_integrator.utils import apply_config, Monitor, get_grid, jitter
 
 
 def objective_single(base_path):

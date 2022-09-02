@@ -13,13 +13,12 @@ from tqdm import tqdm
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DI
-from src.double_integrator.di_lqg import get_grid, jitter
 from src.double_integrator.di_lqr import add_variables
 from src.double_integrator.plotting import plot_training_curve, float2str, \
     plot_phase_diagram
 from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import apply_config, RNG, Monitor, \
-    get_lqr_cost
+    get_lqr_cost, get_grid, jitter
 
 
 class RNNModel(nn.Module):

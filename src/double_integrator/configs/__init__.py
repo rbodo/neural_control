@@ -1,5 +1,6 @@
 from src.double_integrator.configs import (
     config,
+    config_collect_lqr_data,
     config_collect_ood_data,
     config_collect_training_data,
     config_di_rnn_pid,

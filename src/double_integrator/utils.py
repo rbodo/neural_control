@@ -387,3 +387,17 @@ class Gramians(mx.gluon.HybridBlock):
     def compute_observability(self):
         self._return_observations = True
         return self.compute_gramian('o')
+
+
+def get_grid(n, x_max=1):
+    x1_min, x1_max = -x_max, x_max
+    x0_min, x0_max = -0.2, 0.2
+    grid = np.mgrid[x0_min:x0_max:complex(0, n), x1_min:x1_max:complex(0, n)]
+    grid = grid[::-1]
+    grid = np.reshape(grid, (-1, n * n))
+    grid = np.transpose(grid)
+    return grid
+
+
+def jitter(x, Sigma, rng):
+    return x + get_additive_white_gaussian_noise(Sigma, len(x), rng)

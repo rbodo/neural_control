@@ -1,51 +1,20 @@
 import sys
-from typing import TYPE_CHECKING
 
 import numpy as np
 from tqdm import tqdm
 from tqdm.contrib import tzip
+from yacs.config import CfgNode
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiLqg
+from src.double_integrator.control_systems import DiLqr
+from src.double_integrator.di_lqr import add_variables, run_single
 from src.double_integrator.plotting import create_plots
-from src.double_integrator.utils import (RNG, Monitor, apply_config,
-                                         get_grid, jitter)
-
-if TYPE_CHECKING:
-    from yacs.config import CfgNode
-
-
-def add_variables(monitor: Monitor):
-    dtype = 'float32'
-    kwargs = [
-        dict(name='states', label='States', column_labels=['x', 'v'],
-             dtype=dtype),
-        dict(name='state_estimates', label='States',
-             column_labels=[r'$\hat{x}$', r'$\hat{v}$'], dtype=dtype),
-        dict(name='outputs', label='Output', column_labels=[r'$y_x$'],
-             dtype=dtype),
-        dict(name='control', label='Control', column_labels=['u'],
-             dtype=dtype),
-        dict(name='cost', label='Cost', column_labels=['c'], dtype=dtype)
-    ]
-    for k in kwargs:
-        monitor.add_variable(**k)
-
-
-def run_single(system, times, monitor, inits):
-    x = inits['x']
-    x_est = inits['x_est']
-    Sigma = inits['Sigma']
-
-    for t in times:
-        x, y, u, c, x_est, Sigma = system.step(t, x, x_est, Sigma)
-
-        monitor.update_variables(t, states=x, outputs=y, control=u, cost=c,
-                                 state_estimates=x_est)
+from src.double_integrator.utils import apply_config, Monitor, get_grid, \
+    jitter, RNG
 
 
 def main(config: 'CfgNode', show_plots: bool = False):
-    label = 'lqg'
+    label = 'lqr'
 
     filepath_output_data = config.paths.FILEPATH_OUTPUT_DATA
     T = config.simulation.T
@@ -77,7 +46,7 @@ def main(config: 'CfgNode', show_plots: bool = False):
         for v in tqdm(observation_noises, 'Observation noise', leave=False):
             monitor.update_parameters(observation_noise=v)
 
-            system = DiLqg(w, v, dt, RNG, q, r)
+            system = DiLqr(w, v, dt, RNG, q, r)
 
             # Initialize the state estimate.
             X0_est = jitter(grid, system.process.W, RNG)
@@ -98,10 +67,13 @@ def main(config: 'CfgNode', show_plots: bool = False):
 
 
 if __name__ == '__main__':
-    _config = configs.config_lqg.get_config()
+
+    _config = configs.config_collect_lqr_data.get_config()
 
     apply_config(_config)
 
-    main(_config, show_plots=True)
+    print(_config)
+
+    main(_config)
 
     sys.exit()

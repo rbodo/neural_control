@@ -11,13 +11,12 @@ from src.double_integrator import configs
 from src.double_integrator.control_systems import DiPidRnn, DiRnn, DiLqg
 from src.double_integrator.di_rnn import (add_variables,
                                           run_single as run_uncontrolled)
-from src.double_integrator.di_lqg import jitter
 from src.double_integrator.plotting import plot_cost_vs_noise_control, \
     plot_trajectories_vs_noise_control
 from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import (apply_config, Monitor, RNG,
                                          split_train_test, select_noise_subset,
-                                         get_trajectories)
+                                         get_trajectories, jitter)
 from src.ff_pid.brownian import brownian
 
 if TYPE_CHECKING:
