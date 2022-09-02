@@ -32,10 +32,12 @@ class DoubleIntegrator(gym.Env):
 
     def __init__(self, var_x=0., var_y=0., dt=0.1, rng=None,
                  cost_threshold=1e-3, state_threshold=None,
-                 q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32):
+                 q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32,
+                 use_observations_in_cost=False):
         super().__init__()
         self.dt = dt
         self.dtype = dtype
+        self.use_observations_in_cost = use_observations_in_cost
         num_inputs = 1
         num_outputs = 1
         num_states = 2
@@ -54,7 +56,9 @@ class DoubleIntegrator(gym.Env):
 
         # State cost matrix:
         if np.isscalar(q):
-            self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
+            dim = self.process.num_outputs if self.use_observations_in_cost \
+                else self.process.num_states
+            self.Q = q * np.eye(dim, dtype=self.dtype)
         else:
             self.Q = np.diag(q)
 
@@ -74,15 +78,16 @@ class DoubleIntegrator(gym.Env):
         self.states = self.process.step(self.t, self.states, action)
         np.clip(self.states, self.min, self.max, self.states)
 
-        self.cost = self.get_cost(self.states, action)
+        observation = self.process.output(self.t, self.states, action)
+        np.clip(observation, self.min, self.max, observation)
+
+        x = observation if self.use_observations_in_cost else self.states
+        self.cost = self.get_cost(x, action)
 
         done = self.cost < self.cost_threshold
         # or abs(self.states[0].item()) > self.state_threshold
 
         reward = -self.cost + done * 10 * np.exp(-self.t / 4)
-
-        observation = self.process.output(self.t, self.states, action)
-        np.clip(observation, self.min, self.max, observation)
 
         self.t += self.dt
 
@@ -94,11 +99,14 @@ class DoubleIntegrator(gym.Env):
             else state_init
         action = 0
 
-        self.cost = self.get_cost(self.states, action)
-
         self.t = 0
 
-        return self.process.output(self.t, self.states, action)
+        observation = self.process.output(self.t, self.states, action)
+
+        x = observation if self.use_observations_in_cost else self.states
+        self.cost = self.get_cost(x, action)
+
+        return observation
 
     def render(self, mode='human'):
         if mode != 'console':
@@ -154,7 +162,7 @@ class FigureRecorderTest(BaseCallback):
         if hasattr(self.model, 'replay_buffer') and n % 1000 > 0:
             return
         states, rewards = eval_rnn(self.locals['env'].envs[0], self.model)
-        episode_reward = np.sum(rewards)
+        episode_reward = np.sum(rewards).item()
         episode_length = len(rewards)
         figure = plot_trajectory(states)
         self.logger.record('trajectory/eval', Figure(figure, close=True),
@@ -261,7 +269,8 @@ def main(study: optuna.Study, path, frozen_params=None,
     # q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
     # r = trial.suggest_float('r', 0.01, 1, log=True)
 
-    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4)
+    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4,
+                           use_observations_in_cost=False)
     env = TimeLimit(env, num_steps)
 
     policy_kwargs = {'lstm_hidden_size': 50,
@@ -310,15 +319,15 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
     warnings.filterwarnings('ignore', category=ExperimentalWarning)
 
-    gpu = 0
+    gpu = 9
 
     study_name = 'lqg_rnn_ppo'
 
     # Make sure the keys are spelled exactly as the parameter names in
     # trial.suggest calls. Every parameter listed here will not be swept over.
     _frozen_params = {
-        # 'learning_rate': 2e-4,
-        # 'num_steps': 300,
+        'learning_rate': 2e-4,
+        'num_steps': 300,
     }
 
     if gpu is not None:
