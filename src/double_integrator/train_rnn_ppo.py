@@ -59,8 +59,12 @@ class DoubleIntegrator(gym.Env):
             dim = self.process.num_outputs if self.use_observations_in_cost \
                 else self.process.num_states
             self.Q = q * np.eye(dim, dtype=self.dtype)
+            self.Q_states = q * np.eye(self.process.num_states,
+                                       dtype=self.dtype)
         else:
             self.Q = np.diag(q)
+            self.Q_states = q * np.eye(self.process.num_states,
+                                       dtype=self.dtype)
 
         # Control cost matrix:
         self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
@@ -84,7 +88,7 @@ class DoubleIntegrator(gym.Env):
         x = observation if self.use_observations_in_cost else self.states
         self.cost = self.get_cost(x, action)
 
-        done = self.cost < self.cost_threshold
+        done = self.is_done(action)
         # or abs(self.states[0].item()) > self.state_threshold
 
         reward = -self.cost + done * 10 * np.exp(-self.t / 4)
@@ -92,6 +96,11 @@ class DoubleIntegrator(gym.Env):
         self.t += self.dt
 
         return observation, reward, done, {}
+
+    def is_done(self, u):
+        cost = get_lqr_cost(self.states, u, self.Q_states, self.R,
+                            self.process.dt).item()
+        return cost < self.cost_threshold
 
     def reset(self, state_init=None):
 
@@ -270,7 +279,7 @@ def main(study: optuna.Study, path, frozen_params=None,
     # r = trial.suggest_float('r', 0.01, 1, log=True)
 
     env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4,
-                           use_observations_in_cost=False)
+                           use_observations_in_cost=True)
     env = TimeLimit(env, num_steps)
 
     policy_kwargs = {'lstm_hidden_size': 50,
@@ -319,7 +328,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
     warnings.filterwarnings('ignore', category=ExperimentalWarning)
 
-    gpu = 9
+    gpu = 9  # Faster on CPU
 
     study_name = 'lqg_rnn_ppo'
 
