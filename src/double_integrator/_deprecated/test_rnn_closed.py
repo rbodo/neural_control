@@ -5,7 +5,7 @@ import numpy as np
 import mxnet as mx
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiRnn
+from src.double_integrator.control_systems_mxnet import DiRnn
 from src.double_integrator.di_rnn import run_single, add_variables
 from src.double_integrator.plotting import plot_phase_diagram
 from src.double_integrator.train_rnn_controller import get_model

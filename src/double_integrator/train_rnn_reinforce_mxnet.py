@@ -10,7 +10,8 @@ from mxnet import autograd, nd
 from tqdm import tqdm
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import RNN, DI
+from src.double_integrator.control_systems import DI
+from src.double_integrator.control_systems_mxnet import RNN
 from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.train_rnn import get_model_name

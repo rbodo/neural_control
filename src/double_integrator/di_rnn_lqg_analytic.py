@@ -4,7 +4,7 @@ import sys
 import numpy as np
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiRnn
+from src.double_integrator.control_systems_mxnet import DiRnn
 from src.double_integrator.di_rnn import add_variables, run_single
 from src.double_integrator.utils import RNG, Monitor, apply_config
 from src.double_integrator.plotting import create_plots

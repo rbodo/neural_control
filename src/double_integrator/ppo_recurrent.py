@@ -26,6 +26,9 @@ from stable_baselines3.common.utils import explained_variance, \
 from stable_baselines3.common.utils import zip_strict
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 
+from src.double_integrator.control_systems_torch import RnnModel, \
+    ControlledRnn
+
 
 class RNNStates(NamedTuple):
     pi: th.Tensor
@@ -208,6 +211,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         shared_lstm: bool = False,
         enable_critic_lstm: bool = True,
         lstm_kwargs: Optional[Dict[str, Any]] = None,
+        controller: Optional[RnnModel] = None,
     ):
         self.lstm_output_dim = lstm_hidden_size
         super().__init__(
@@ -239,6 +243,11 @@ class MlpRnnPolicy(ActorCriticPolicy):
             num_layers=n_lstm_layers,
             **self.lstm_kwargs,
         )
+        if controller is not None:
+            self.lstm_actor = ControlledRnn(
+                self.lstm_actor,
+                controller,
+            )
         # For the predict() method, to initialize hidden states
         # (n_lstm_layers, batch_size, lstm_hidden_size)
         self.lstm_hidden_state_shape = (n_lstm_layers, 1, lstm_hidden_size)
@@ -285,7 +294,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         features: th.Tensor,
         lstm_states: th.Tensor,
         episode_starts: th.Tensor,
-        lstm: nn.RNN,
+        lstm: Union[nn.RNN, ControlledRnn],
     ) -> Tuple[th.Tensor, th.Tensor]:
         """
         Do a forward pass in the LSTM network.

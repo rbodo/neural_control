@@ -3,12 +3,10 @@ import logging
 import sys
 import os
 import warnings
-from typing import Union, Callable
+from typing import Callable
 
 import mlflow
 import numpy as np
-import gym
-from gym import spaces
 from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
 # from stable_baselines3 import PPO, SAC
@@ -20,107 +18,10 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import Figure
 from tqdm import trange
 
-from src.double_integrator.control_systems import DI
+from src.double_integrator.control_systems_torch import DiGym
+from src.double_integrator.plotting import plot_phase_diagram
 from src.double_integrator.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
-from src.double_integrator.utils import get_lqr_cost
-
-
-class DoubleIntegrator(gym.Env):
-    """Custom Environment that follows gym interface."""
-
-    metadata = {'render.modes': ['console']}
-
-    def __init__(self, var_x=0., var_y=0., dt=0.1, rng=None,
-                 cost_threshold=1e-3, state_threshold=None,
-                 q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32,
-                 use_observations_in_cost=False):
-        super().__init__()
-        self.dt = dt
-        self.dtype = dtype
-        self.use_observations_in_cost = use_observations_in_cost
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        self.process = DI(num_inputs, num_outputs, num_states, var_x, var_y,
-                          self.dt, rng)
-
-        self.min = -1
-        self.max = 1
-        self.action_space = spaces.Box(-10, 10, (1,), self.dtype)
-        self.observation_space = spaces.Box(self.min, self.max, (num_outputs,),
-                                            self.dtype)
-        self.init_state_space = spaces.Box(self.min / 2, self.max / 2,
-                                           (num_states,), self.dtype)
-        self.cost_threshold = cost_threshold
-        self.state_threshold = state_threshold or self.max
-
-        # State cost matrix:
-        if np.isscalar(q):
-            dim = self.process.num_outputs if self.use_observations_in_cost \
-                else self.process.num_states
-            self.Q = q * np.eye(dim, dtype=self.dtype)
-            self.Q_states = q * np.eye(self.process.num_states,
-                                       dtype=self.dtype)
-        else:
-            self.Q = np.diag(q)
-            self.Q_states = q * np.eye(self.process.num_states,
-                                       dtype=self.dtype)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
-
-        self.states = None
-        self.cost = None
-        self.t = None
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
-                            normalize=False).item()
-
-    def step(self, action):
-
-        self.states = self.process.step(self.t, self.states, action)
-        np.clip(self.states, self.min, self.max, self.states)
-
-        observation = self.process.output(self.t, self.states, action)
-        np.clip(observation, self.min, self.max, observation)
-
-        x = observation if self.use_observations_in_cost else self.states
-        self.cost = self.get_cost(x, action)
-
-        done = self.is_done(action)
-        # or abs(self.states[0].item()) > self.state_threshold
-
-        reward = -self.cost + done * 10 * np.exp(-self.t / 4)
-
-        self.t += self.dt
-
-        return observation, reward, done, {}
-
-    def is_done(self, u):
-        cost = get_lqr_cost(self.states, u, self.Q_states, self.R,
-                            self.process.dt).item()
-        return cost < self.cost_threshold
-
-    def reset(self, state_init=None):
-
-        self.states = self.init_state_space.sample() if state_init is None \
-            else state_init
-        action = 0
-
-        self.t = 0
-
-        observation = self.process.output(self.t, self.states, action)
-
-        x = observation if self.use_observations_in_cost else self.states
-        self.cost = self.get_cost(x, action)
-
-        return observation
-
-    def render(self, mode='human'):
-        if mode != 'console':
-            raise NotImplementedError()
-        logging.info("States: ", self.states, "\tCost: ", self.cost)
+from src.double_integrator.utils import get_artifact_path
 
 
 def get_states(model, i_step, num_steps=1):
@@ -130,64 +31,55 @@ def get_states(model, i_step, num_steps=1):
                                                 num_steps * k]
 
 
-def plot_trajectory(states, path=None, show=False):
-    plt.plot(states[:, 0, 0], states[:, 0, 1])
-    plt.plot(states[0, 0, 0], states[0, 0, 1], 'bo')
-    plt.plot(0, 0, 'kx')
-    plt.xlim(-1, 1)
-    plt.ylim(-1, 1)
-    plt.xlabel('x')
-    plt.ylabel('v')
-    if show:
-        plt.show()
-    if path is not None:
-        plt.savefig(path)
-    return plt.gcf()
-
-
-class FigureRecorderTrain(BaseCallback):
-    def _on_step(self) -> bool:
-        return True
-
-    def _on_rollout_end(self):
-        if hasattr(self.model, 'rollout_buffer'):
-            states = self.model.rollout_buffer.observations
-        else:
-            states = get_states(self.model, self.n_calls, 1000)
-            if states is None:
-                return
-        figure = plot_trajectory(states)
-        self.logger.record('trajectory/train', Figure(figure, close=True),
-                           exclude=('stdout', 'log', 'json', 'csv'))
-        plt.close()
-
-
 class FigureRecorderTest(BaseCallback):
     def _on_step(self) -> bool:
-        return True
-
-    def _on_rollout_end(self):
         n = self.n_calls
-        if hasattr(self.model, 'replay_buffer') and n % 1000 > 0:
-            return
-        states, rewards = eval_rnn(self.locals['env'].envs[0], self.model)
-        episode_reward = np.sum(rewards).item()
-        episode_length = len(rewards)
-        figure = plot_trajectory(states)
+        env = self.locals['env'].envs[0]
+        episode_reward, episode_length = evaluate(self.model, env, 100)
+        states, rewards = run_single(env, self.model)
+        figure = plot_phase_diagram({'x': states[:, 0, 0],
+                                     'v': states[:, 0, 1]}, xt=[0, 0],
+                                    show=False, xlim=[-1, 1], ylim=[-1, 1])
         self.logger.record('trajectory/eval', Figure(figure, close=True),
                            exclude=('stdout', 'log', 'json', 'csv'))
         self.logger.record('test/episode_reward', episode_reward)
         self.logger.record('test/episode_length', episode_length)
         mlflow.log_figure(figure, f'figures/trajectory_{n}.png')
-        mlflow.log_metric(key='episode_reward', value=episode_reward, step=n)
-        mlflow.log_metric(key='episode_length', value=episode_length, step=n)
+        mlflow.log_metric(key='test_reward', value=episode_reward, step=n)
+        mlflow.log_metric(key='test_episode_length', value=episode_length,
+                          step=n)
+        mlflow.log_metric(key='training_reward',
+                          value=self.model.ep_info_buffer[-1]['r'], step=n)
         plt.close()
+        return True
 
 
-def eval_rnn(env, model, x0=None, monitor=None):
+def evaluate(model, env, n, filename=None, deterministic=True):
+    reward_means, episode_lengths = run_n(n, env, model,
+                                          deterministic=deterministic)
+    if filename is not None:
+        states, rewards = run_single(env, model)
+        fig = plot_phase_diagram({'x': states[:, 0, 0], 'v': states[:, 0, 1]},
+                                 xt=[0, 0], show=False, xlim=[-1, 1],
+                                 ylim=[-1, 1])
+        mlflow.log_figure(fig, os.path.join('figures', filename))
+    return np.mean(reward_means).item(), np.mean(episode_lengths).item()
+
+
+def run_n(n, *args, **kwargs):
+    reward_means = []
+    episode_lengths = []
+    for i in range(n):
+        states, rewards = run_single(*args, **kwargs)
+        reward_means.append(np.sum(rewards).item())
+        episode_lengths.append(len(rewards))
+    return reward_means, episode_lengths
+
+
+def run_single(env, model, x0=None, monitor=None, deterministic=True):
     t = 0
     y = env.reset(state_init=x0)
-    x = env.states
+    x = env.states.cpu().numpy()
 
     # cell and hidden state of the LSTM
     lstm_states = None
@@ -199,7 +91,7 @@ def eval_rnn(env, model, x0=None, monitor=None):
     while True:
         u, lstm_states = model.predict(y, state=lstm_states,
                                        episode_start=episode_starts,
-                                       deterministic=True)
+                                       deterministic=deterministic)
         states.append(x)
         if monitor is not None:
             monitor.update_variables(t, states=x, outputs=y, control=u,
@@ -207,7 +99,7 @@ def eval_rnn(env, model, x0=None, monitor=None):
 
         y, reward, done, info = env.step(u)
         rewards.append(reward)
-        x = env.states
+        x = env.states.cpu().numpy()
         t += env.process.dt
         episode_starts = done
         if done:
@@ -257,6 +149,8 @@ def linear_schedule(initial_value: float,
 def main(study: optuna.Study, path, frozen_params=None,
          mlflow_callback: MLflowCallback = None, show_plots=False):
 
+    device = 'cpu' if GPU is None else 'cuda:0'
+
     if frozen_params is not None:
         study.enqueue_trial(frozen_params)
 
@@ -278,8 +172,14 @@ def main(study: optuna.Study, path, frozen_params=None,
     # q_y = trial.suggest_float('q_y', 0.1, 10, log=True)
     # r = trial.suggest_float('r', 0.01, 1, log=True)
 
-    env = DoubleIntegrator(var_x=1e-2, var_y=1e-1, cost_threshold=1e-4,
-                           use_observations_in_cost=True)
+    num_inputs = 1
+    num_outputs = 1
+    num_states = 2
+    process_noise = 1e-2
+    observation_noise = 1e-1
+    env = DiGym(num_inputs, num_outputs, num_states, device,
+                process_noise, observation_noise, cost_threshold=1e-4,
+                use_observations_in_cost=True)
     env = TimeLimit(env, num_steps)
 
     policy_kwargs = {'lstm_hidden_size': 50,
@@ -288,7 +188,7 @@ def main(study: optuna.Study, path, frozen_params=None,
                      # 'enable_critic_lstm': False,
                      }
     log_dir = os.path.join(path, 'tensorboard_log')
-    model = RecurrentPPO(MlpRnnPolicy, env, verbose=0, device='cuda',
+    model = RecurrentPPO(MlpRnnPolicy, env, verbose=0, device=device,
                          tensorboard_log=log_dir, policy_kwargs=policy_kwargs,
                          learning_rate=linear_schedule(learning_rate, 0.005),
                          n_steps=num_steps, n_epochs=10)
@@ -300,10 +200,12 @@ def main(study: optuna.Study, path, frozen_params=None,
     ])
 
     if show_plots:
-        states, rewards = eval_rnn(env, model)
+        states, rewards = run_single(env, model)
         path_figure = os.path.join(path, 'figures',
                                    'lqg_rnn_ppo_trajectory.png')
-        plot_trajectory(states, path_figure)
+        plot_phase_diagram({'x': states[:, 0, 0], 'v': states[:, 0, 1]},
+                           xt=[0, 0], show=False, xlim=[-1, 1], ylim=[-1, 1],
+                           path=path_figure)
 
     rewards, episode_lengths = evaluate_policy(model, env, n_eval_episodes=100,
                                                warn=False,
@@ -317,8 +219,7 @@ def main(study: optuna.Study, path, frozen_params=None,
         frozen_trial = study._storage.get_trial(trial._trial_id)
         mlflow_callback(study, frozen_trial)
         mlflow.log_artifact(model.logger.get_dir(), 'tensorboard_log')
-        path_model = os.path.join(mlflow.get_artifact_uri().split(':', 1)[1],
-                                  f'models/model_{trial.number}')
+        path_model = get_artifact_path(f'models/model_{trial.number}')
         # mlflow.pytorch.log_model(model, f'models/model_{trial.number}')
         run.__exit__(None, None, None)
     model.save(path_model)
@@ -328,7 +229,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
     warnings.filterwarnings('ignore', category=ExperimentalWarning)
 
-    gpu = 9  # Faster on CPU
+    GPU = 9  # Faster on CPU
 
     study_name = 'lqg_rnn_ppo'
 
@@ -339,8 +240,10 @@ if __name__ == '__main__':
         'num_steps': 300,
     }
 
-    if gpu is not None:
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
+    if GPU is None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(GPU)
 
     optuna.logging.set_verbosity(optuna.logging.INFO)
     optuna.logging.get_logger('optuna').addHandler(

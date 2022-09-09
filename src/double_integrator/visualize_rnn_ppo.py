@@ -8,10 +8,11 @@ from yacs.config import CfgNode
 
 from src.double_integrator import configs
 from src.double_integrator.control_systems import DiLqg
+from src.double_integrator.control_systems_torch import DiGym
 from src.double_integrator.di_rnn import add_variables
 from src.double_integrator.plotting import plot_cost, plot_trajectories
 from src.double_integrator.ppo_recurrent import MlpRnnPolicy, RecurrentPPO
-from src.double_integrator.train_rnn_ppo import DoubleIntegrator, eval_rnn
+from src.double_integrator.hyperparameter_rnn_ppo import run_single
 from src.double_integrator.utils import apply_config, RNG, Monitor, get_grid, \
     jitter
 
@@ -63,7 +64,7 @@ def main(config: 'CfgNode', n: int):
     add_variables(monitor)
 
     # Set cost threshold impossibly low so we always run for the full duration.
-    env = DoubleIntegrator(w, v, dt, RNG, cost_threshold=1e-4, q=q, r=r)
+    env = DiGym(w, v, dt, RNG, cost_threshold=1e-4, q=q, r=r)
     env = TimeLimit(env, num_steps)
 
     policy_kwargs = {'lstm_hidden_size': 50}
@@ -79,7 +80,7 @@ def main(config: 'CfgNode', n: int):
         run_lqg(lqg, times, monitor, inits)
 
         monitor.update_parameters(controller='rnn')
-        eval_rnn(env, model, x, monitor)
+        run_single(env, model, x, monitor)
 
     df = monitor.get_dataframe()
     df.to_pickle(filepath_output_data)

@@ -8,7 +8,7 @@ import mxnet as mx
 
 from src.double_integrator.configs.config import get_config
 from src.double_integrator._deprecated.di_lqg import DiLqg
-from src.double_integrator.control_systems import RnnModel
+from src.double_integrator.control_systems_mxnet import RnnModel
 from src.double_integrator._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,
     DIMENSION_MAP, plot_timeseries, rnn_controller_output, lqe_dynamics,

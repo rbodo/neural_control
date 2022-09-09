@@ -8,7 +8,8 @@ from tqdm.contrib import tzip
 from typing import TYPE_CHECKING
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiPidRnn, DiRnn, DiLqg
+from src.double_integrator.control_systems import DiLqg
+from src.double_integrator.control_systems_mxnet import DiPidRnn, DiRnn
 from src.double_integrator.di_rnn import (add_variables,
                                           run_single as run_uncontrolled)
 from src.double_integrator.plotting import plot_cost_vs_noise_control, \

@@ -12,12 +12,11 @@ from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import RnnModel, DIMx, \
-    ClosedControlledNeuralSystem
+from src.double_integrator.control_systems_mxnet import RnnModel, Di, \
+    ClosedControlledNeuralSystem, Masker, Gramians, LQRLoss
 from src.double_integrator.plotting import plot_phase_diagram, \
     plot_control_output
-from src.double_integrator.utils import get_artifact_path, get_data_loaders, \
-    Gramians
+from src.double_integrator.utils import get_artifact_path, get_data_loaders
 
 
 def evaluate(model: ClosedControlledNeuralSystem, data_loader, loss_function,
@@ -63,9 +62,9 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
     num_steps = config.simulation.NUM_STEPS
     dt = T / num_steps
 
-    environment = DIMx(neuralsystem_num_outputs, environment_num_outputs,
-                       environment_num_states, context, process_noise,
-                       observation_noise, dt, prefix='environment_')
+    environment = Di(neuralsystem_num_outputs, environment_num_outputs,
+                     environment_num_states, context, process_noise,
+                     observation_noise, dt, prefix='environment_')
 
     neuralsystem = RnnModel(neuralsystem_num_states, neuralsystem_num_layers,
                             neuralsystem_num_outputs, environment_num_outputs,
@@ -93,45 +92,6 @@ def get_model(config, context, freeze_neuralsystem, freeze_controller,
     model.hybridize(active=True, static_alloc=True, static_shape=True)
 
     return model
-
-
-class LQRLoss(mx.gluon.loss.Loss):
-    def __init__(self, weight=1, batch_axis=0, **kwargs):
-        self.Q = kwargs.pop('Q')
-        self.R = kwargs.pop('R')
-        super().__init__(weight, batch_axis, **kwargs)
-
-    # noinspection PyMethodOverriding,PyProtectedMember
-    def hybrid_forward(self, F, x, u, sample_weight=None):
-        loss = (F.sum(x * F.batch_dot(F.tile(self.Q, (len(x), 1, 1)), x), 1) +
-                F.sum(u * F.batch_dot(F.tile(self.R, (len(x), 1, 1)), u), 1))
-        loss = mx.gluon.loss._apply_weighting(F, loss, self._weight,
-                                              sample_weight)
-        if mx.is_np_array():
-            if F is mx.nd.ndarray:
-                return F.np.mean(loss, axis=tuple(range(1, loss.ndim)))
-            else:
-                return F.npx.batch_flatten(loss).mean(axis=1)
-        else:
-            return F.mean(loss, axis=self._batch_axis, exclude=True)
-
-
-class Masker:
-    def __init__(self, model: ClosedControlledNeuralSystem, p,
-                 rng: np.random.Generator):
-        self.model = model
-        self.p = p
-        n = self.model.neuralsystem.num_hidden
-        self._controllability_mask = np.nonzero(rng.binomial(1, self.p, n))
-        self._observability_mask = np.nonzero(rng.binomial(1, self.p, n))
-
-    def apply_mask(self):
-        if self.p == 0:
-            return
-        self.model.controller.decoder.weight.data()[
-            self._controllability_mask] = 0
-        self.model.controller.rnn.l0_i2h_weight.data()[
-            :, self._observability_mask] = 0
 
 
 def train(config, perturbation_type, perturbation_level, dropout_probability,
@@ -298,7 +258,7 @@ def main(config):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    GPU = 2
+    GPU = 8
     EXPERIMENT_NAME = 'train_rnn_controller'
 
     _config = configs.config_train_rnn_controller.get_config()

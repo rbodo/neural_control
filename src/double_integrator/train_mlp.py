@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import MlpModel
+from src.double_integrator.control_systems_mxnet import MlpModel
 from src.double_integrator.utils import apply_config
 
 

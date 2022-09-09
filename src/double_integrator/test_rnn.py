@@ -6,7 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiRnn
+from src.double_integrator.control_systems_mxnet import DiRnn
 from src.double_integrator.di_rnn import run_single, add_variables
 from src.double_integrator.train_rnn import get_model_name
 from src.double_integrator.utils import (RNG, Monitor, select_noise_subset,

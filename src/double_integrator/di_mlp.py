@@ -3,7 +3,7 @@ import sys
 import numpy as np
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DiMlp
+from src.double_integrator.control_systems_mxnet import DiMlp
 from src.double_integrator.utils import RNG, Monitor, apply_config
 from src.double_integrator.plotting import create_plots
 

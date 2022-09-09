@@ -12,7 +12,7 @@ from tqdm.contrib import tenumerate
 
 from py.emgr import emgr
 from src.double_integrator import configs
-from src.double_integrator.control_systems import RnnModel
+from src.double_integrator.control_systems_mxnet import RnnModel
 from src.double_integrator.plotting import plot_training_curve, float2str
 from src.double_integrator.utils import apply_config, get_data_loaders
 

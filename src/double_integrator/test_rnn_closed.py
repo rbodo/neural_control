@@ -5,7 +5,7 @@ import numpy as np
 import mxnet as mx
 
 from src.double_integrator import configs
-from src.double_integrator.control_systems import DIMx, \
+from src.double_integrator.control_systems_mxnet import Di, \
     ClosedControlledNeuralSystem
 from src.double_integrator.plotting import plot_phase_diagram
 from src.double_integrator.train_rnn_controller import get_model
@@ -26,8 +26,8 @@ path_model = '/home/bodrue/Data/neural_control/double_integrator/' \
              'rnn_controller/rnn.params'
 model = get_model(config, context, freeze_neuralsystem=False,
                   freeze_controller=True, load_weights_from=path_model)
-environment = DIMx(1, 1, 2, context, process_noise, observation_noise, dt,
-                   prefix='environment_')
+environment = Di(1, 1, 2, context, process_noise, observation_noise, dt,
+                 prefix='environment_')
 model_closed = ClosedControlledNeuralSystem(
     environment, model.neuralsystem, model.controller, context, batch_size,
     num_steps)

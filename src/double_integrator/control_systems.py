@@ -1,10 +1,13 @@
+import logging
+from typing import Union
+
 import control
-import mxnet as mx
 import numpy as np
+import gym
+from gym import spaces
 
 from src.double_integrator.utils import (get_lqr_cost, get_initial_states,
                                          get_additive_white_gaussian_noise)
-from src.ff_pid.pid import PID
 
 
 class LQR:
@@ -114,215 +117,6 @@ class LQG:
         return self.process.dynamics(t, x, u)
 
 
-class MLP:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, dtype='float32'):
-
-        self.process = process
-        self.dtype = dtype
-
-        # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
-
-        self.model = MlpModel(**model_kwargs)
-        self.model.hybridize()
-        if path_model is None:
-            self.model.initialize()
-        else:
-            self.model.load_parameters(path_model)
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
-
-    def get_control(self, x):
-        # Add dummy dimension for batch size.
-        x = mx.nd.array(np.expand_dims(x, 0))
-        u = self.model(x)
-        return u.asnumpy()[0]
-
-    def step(self, t, x, y):
-        u = self.get_control(y)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        c = self.get_cost(x, u)
-
-        return x, y, u, c
-
-    def dynamics(self, t, x, u):
-        y = self.process.output(t, x, u)
-        u = self.get_control(y)
-
-        return self.process.dynamics(t, x, u)
-
-
-class RNN:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, gpu=0, dtype='float32'):
-
-        self.process = process
-        self.dtype = dtype
-
-        # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
-
-        self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
-        self.model = RnnModel(**model_kwargs)
-        self.model.hybridize()
-        if path_model is None:
-            self.model.initialize(ctx=self.context)
-        else:
-            self.model.load_parameters(path_model, ctx=self.context)
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
-
-    def get_control(self, x, u):
-        # Add dummy dimensions for shape [num_timesteps, batch_size,
-        # num_states].
-        u = mx.nd.array(np.expand_dims(u, [0, 1]), self.context)
-        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
-        x = mx.nd.array(np.reshape(x, (-1, 1, self.model.num_hidden)),
-                        self.context)
-        y, x = self.model(u, x)
-        return y.asnumpy().ravel(), x[0].asnumpy().ravel()
-
-    def step(self, t, x, y, x_rnn):
-        u, x_rnn = self.get_control(x_rnn, y)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        c = self.get_cost(x, u)
-
-        return x, y, u, c, x_rnn
-
-    def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.model.num_hidden, self.dtype)
-        y = self.process.output(t, x, u)
-        u, x_rnn = self.get_control(x_rnn, y)
-
-        return self.process.dynamics(t, x, u)
-
-
-class PidRnn:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, gpu=0, k_p=1, k_i=1, k_d=1,
-                 dtype='float32'):
-
-        self.process = process
-        self.dtype = dtype
-
-        # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
-
-        self.context = mx.gpu(gpu) if mx.context.num_gpus() > 0 else mx.cpu()
-        self.model_kwargs = model_kwargs
-        self.path_model = path_model
-        self.model = self.get_model()
-        self.model_setpoint = self.get_model()
-        self.pid = PID(k_p=k_p, k_i=k_i, k_d=k_d)
-
-    def get_model(self):
-        model = RnnModel(**self.model_kwargs)
-        model.hybridize()
-        if self.path_model is None:
-            model.initialize(ctx=self.context)
-        else:
-            model.load_parameters(self.path_model, ctx=self.context)
-        return model
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt)
-
-    def get_control(self, x_perturbed, x_setpoint, u, t):
-        u_perturbed, x_rnn_perturbed = \
-            self._forward(x_perturbed, u, self.model)
-        u_setpoint, x_rnn_setpoint = \
-            self._forward(x_setpoint, u, self.model_setpoint)
-        u = self.pid.update(u_perturbed, u_setpoint, t)
-        return u_perturbed + u, x_rnn_perturbed, x_rnn_setpoint
-
-    def _forward(self, x, u, model):
-        # Add dummy dimensions for shape [num_timesteps, batch_size,
-        # num_states].
-        u = mx.nd.array(np.expand_dims(u, [0, 1]), self.context)
-        # Add dummy dimensions for shape [num_layers, batch_size, num_states].
-        x = mx.nd.array(np.reshape(x, (-1, 1, model.num_hidden)), self.context)
-        y, x = model(u, x)
-        return y.asnumpy().ravel(), x[0].asnumpy().ravel()
-
-    def step(self, t, x, y, x_rnn_perturbed, x_rnn_setpoint):
-        u, x_rnn_perturbed, x_rnn_setpoint = self.get_control(
-            x_rnn_perturbed, x_rnn_setpoint, y, t)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        c = self.get_cost(x, u)
-
-        return x, y, u, c, x_rnn_perturbed, x_rnn_setpoint
-
-    def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.model.num_hidden, self.dtype)
-        y = self.process.output(t, x, u)
-        u, _, _ = self.get_control(x_rnn, x_rnn.copy(), y, t)
-
-        return self.process.dynamics(t, x, u)
-
-
-class LqeMlp:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs=None):
-        self.process = process
-        self.estimator = LQE(self.process)
-        self.control = MLP(self.process, q, r, path_model, model_kwargs)
-
-    def step(self, t, x, x_est, Sigma):
-        u = self.control.get_control(x_est)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
-        c = self.control.get_cost(x_est, u)
-
-        return x, y, u, c, x_est, Sigma
-
-    def dynamics(self, t, x, u):
-        y = self.process.output(t, x, u)
-        u = self.control.get_control(y)
-
-        return self.process.dynamics(t, x, u)
-
-
-class LqeRnn:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs=None, dtype='float32'):
-        self.process = process
-        self.dtype = dtype
-        self.estimator = LQE(self.process)
-        self.control = RNN(self.process, q, r, path_model, model_kwargs)
-
-    def step(self, t, x, x_rnn, x_est, Sigma):
-        u, x_rnn = self.control.get_control(x_rnn, x_est)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
-        c = self.control.get_cost(x_est, u)
-
-        return x, y, u, c, x_rnn, x_est, Sigma
-
-    def dynamics(self, t, x, u):
-        x_rnn = np.zeros(self.control.model.num_hidden, self.dtype)
-        y = self.process.output(t, x, u)
-        u, x_rnn = self.control.get_control(x_rnn, y)
-
-        return self.process.dynamics(t, x, u)
-
-
 class StochasticLinearIOSystem(control.LinearIOSystem):
 
     def __rdiv__(self, other):
@@ -366,7 +160,7 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
 
 
 class DI(StochasticLinearIOSystem):
-    def __init__(self, num_inputs, num_outputs, num_states, var_x=0, var_y=0,
+    def __init__(self, num_inputs, num_outputs, num_states, var_x=0., var_y=0.,
                  dt=0.1, rng=None, **kwargs):
 
         self.num_inputs = num_inputs
@@ -428,316 +222,94 @@ class DiLqg(LQG):
         super().__init__(process, q, r, normalize_cost)
 
 
-class DiMlp(MLP):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs=None):
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs)
+class DiGym(gym.Env):
+    """Custom environment that follows gym interface."""
 
+    metadata = {'render.modes': ['console']}
 
-class DiLqeMlp(LqeMlp):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs=None):
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs)
-
-
-class DiRnn(RNN):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs: dict = None, gpu=0):
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs, gpu)
-
-
-class DiPidRnn(PidRnn):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs: dict = None, gpu=0, k_p=1,
-                 k_i=1, k_d=1):
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs, gpu, k_p,
-                         k_i, k_d)
-
-
-class DiLqeRnn(LqeRnn):
-    def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
-                 path_model=None, model_kwargs: dict = None):
-        num_inputs = 1
-        num_outputs = 1
-        num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
-        super().__init__(process, q, r, path_model, model_kwargs)
-
-
-class RnnModel(mx.gluon.HybridBlock):
-
-    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
-                 activation_rnn=None, activation_decoder=None, **kwargs):
-
-        super().__init__(**kwargs)
-
-        self.num_hidden = num_hidden
-        self.num_layers = num_layers
-
-        with self.name_scope():
-            if self.num_layers == 1 and activation_rnn == 'linear':
-                self.rnn = mx.gluon.rnn.RNNCell(num_hidden,
-                                                mx.gluon.nn.LeakyReLU(1),
-                                                input_size=input_size)
-            else:
-                self.rnn = mx.gluon.rnn.RNN(
-                    num_hidden, num_layers, activation_rnn,
-                    input_size=input_size, prefix='rnn_')
-            self.decoder = mx.gluon.nn.Dense(
-                num_outputs, activation=activation_decoder,
-                in_units=num_hidden, flatten=False, prefix='decoder_')
-
-    # noinspection PyUnusedLocal
-    def hybrid_forward(self, F, x, *args):
-        output, hidden = self.rnn(x, args[0])
-        decoded = self.decoder(output)
-        return decoded, hidden
-
-
-class MlpModel(mx.gluon.HybridBlock):
-
-    def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
-
-        super().__init__(**kwargs)
-
-        self.num_hidden = num_hidden
-
-        with self.name_scope():
-            self.hidden = mx.gluon.nn.Dense(num_hidden, activation='relu')
-            self.output = mx.gluon.nn.Dense(num_outputs, activation='tanh')
-
-    # noinspection PyUnusedLocal
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        return self.output(self.hidden(x))
-
-
-# noinspection PyUnusedLocal
-class StochasticLinearIOSystemMx(mx.gluon.HybridBlock):
-    def __init__(self, num_inputs, num_outputs, num_states, context, dt=0.1,
-                 dtype='float32', **kwargs):
-        super().__init__(**kwargs)
-
-        self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
-        self.num_states = num_states
-        self.context = context
+    def __init__(self, num_inputs, num_outputs, num_states, var_x=0., var_y=0.,
+                 dt=0.1, rng=None, cost_threshold=1e-3, state_threshold=None,
+                 q: Union[float, np.iterable] = 0.5, r=0.5, dtype=np.float32,
+                 use_observations_in_cost=False):
+        super().__init__()
+        self.dt = dt
         self.dtype = dtype
+        self.use_observations_in_cost = use_observations_in_cost
+        self.process = DI(num_inputs, num_outputs, num_states, var_x, var_y,
+                          self.dt, rng)
 
-        with self.name_scope():
-            specs = dict(grad_req='null', init=mx.init.Zero(),
-                         dtype=self.dtype, allow_deferred_init=True,
-                         differentiable=False)
-            self.dt = self.params.get('dt', shape=(1,), **specs)
-            self.A = self.params.get(
-                'A', shape=(self.num_states, self.num_states), **specs)
-            self.B = self.params.get(
-                'B', shape=(self.num_states, self.num_inputs), **specs)
-            self.C = self.params.get(
-                'C', shape=(self.num_outputs, self.num_states), **specs)
-            self.D = self.params.get(
-                'D', shape=(self.num_outputs, self.num_inputs), **specs)
-            self.W = None
-            self.V = None
-        self.initialize(mx.init.Zero(), self.context)
-        self.dt.data()[:] = dt
+        self.min = -1
+        self.max = 1
+        self.action_space = spaces.Box(-10, 10, (1,), self.dtype)
+        self.observation_space = spaces.Box(self.min, self.max, (num_outputs,),
+                                            self.dtype)
+        self.init_state_space = spaces.Box(self.min / 2, self.max / 2,
+                                           (num_states,), self.dtype)
+        self.cost_threshold = cost_threshold
+        self.state_threshold = state_threshold or self.max
 
-    def begin_state(self, batch_size, context, F):
-        return F.zeros((1, batch_size, self.num_states), ctx=context)
-
-    def step(self, F, x, u, **kwargs):
-        dxdt = self.dynamics(F, x, u, **kwargs)
-        x = self.integrate(F, x, dxdt, **kwargs)
-        return self.add_process_noise(F, x, **kwargs)
-
-    @staticmethod
-    def dynamics(F, x, u, **kwargs):
-        return F.elemwise_add(F.dot(x, F.transpose(kwargs['A'])),
-                              F.dot(u, F.transpose(kwargs['B'])))
-
-    def integrate(self, F, x, dxdt, **kwargs):
-        method = kwargs.get('method', 'euler-maruyama')
-        if method == 'euler-maruyama':  # x + dt * dx/dt
-            return F.elemwise_add(x, F.broadcast_mul(kwargs['dt'], dxdt))
+        # State cost matrix:
+        if np.isscalar(q):
+            dim = self.process.num_outputs if self.use_observations_in_cost \
+                else self.process.num_states
+            self.Q = q * np.eye(dim, dtype=self.dtype)
+            self.Q_states = q * np.eye(self.process.num_states,
+                                       dtype=self.dtype)
         else:
-            raise NotImplementedError
+            self.Q = np.diag(q)
+            self.Q_states = q * np.eye(self.process.num_states,
+                                       dtype=self.dtype)
 
-    def add_process_noise(self, F, x, **kwargs):
-        W = kwargs.pop('W', None)
-        if W is None or kwargs.get('deterministic', False):
-            return x
-        dW = self.get_additive_white_gaussian_noise(
-            F, self.num_states,
-            F.broadcast_mul(F.ones(self.num_states, ctx=self.context),
-                            F.sqrt(kwargs['dt'])))
-        return F.broadcast_add(x, F.dot(W, dW))
+        # Control cost matrix:
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
 
-    def output(self, F, x, u, **kwargs):
-        y = F.elemwise_add(F.dot(x, F.transpose(kwargs['C'])),
-                           F.dot(u, F.transpose(kwargs['D'])))
-        return self.add_observation_noise(F, y, **kwargs)
+        self.states = None
+        self.cost = None
+        self.t = None
 
-    def add_observation_noise(self, F, y, **kwargs):
-        V = kwargs.pop('V', None)
-        if V is None or kwargs.get('deterministic', False):
-            return y
-        return F.broadcast_add(
-            y, self.get_additive_white_gaussian_noise(F, self.num_outputs,
-                                                      F.diag(V)))
+    def get_cost(self, x, u):
+        return get_lqr_cost(x, u, self.Q, self.R, self.dt).item()
 
-    def get_additive_white_gaussian_noise(self, F, n, scale):
-        return F.sample_normal(F.zeros(n, ctx=self.context), scale,
-                               dtype=self.dtype)
+    def step(self, action):
 
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        u = args[0]
-        x = self.step(F, x, u, **kwargs)
-        return self.output(F, x, u, **kwargs), x
+        self.states = self.process.step(self.t, self.states, action)
+        np.clip(self.states, self.min, self.max, self.states)
 
+        observation = self.process.output(self.t, self.states, action)
+        np.clip(observation, self.min, self.max, observation)
 
-class DIMx(StochasticLinearIOSystemMx):
-    def __init__(self, num_inputs, num_outputs, num_states, context, var_x=0,
-                 var_y=0, dt=0.1, dtype='float32', **kwargs):
+        x = observation if self.use_observations_in_cost else self.states
+        self.cost = self.get_cost(x, action)
 
-        super().__init__(num_inputs, num_outputs, num_states, context, dt,
-                         dtype, **kwargs)
+        done = self.is_done(action)
+        # or abs(self.states[0].item()) > self.state_threshold
 
-        self.A.data()[0, 1] = 1
-        self.B.data()[1, 0] = 1  # Control only second state (acceleration).
-        self.C.data()[:] = mx.nd.eye(self.num_outputs, self.num_states,
-                                     ctx=self.context, dtype=self.dtype)
-        specs = dict(grad_req='null', init=mx.init.Zero(), dtype=self.dtype,
-                     allow_deferred_init=False, differentiable=False)
-        if var_x:
-            self.W = self.params.get(
-                'W', shape=(self.num_states, self.num_states), **specs)
-            self.W.initialize(ctx=self.context)
-            self.W.data()[:] = var_x * mx.nd.eye(self.num_states,
-                                                 ctx=self.context, dtype=dtype)
-        if var_y:
-            self.V = self.params.get(
-                'V', shape=(self.num_outputs, self.num_outputs), **specs)
-            self.V.initialize(ctx=self.context)
-            self.V.data()[:] = var_y * mx.nd.eye(self.num_outputs,
-                                                 ctx=self.context, dtype=dtype)
+        reward = -self.cost + done * 10 * np.exp(-self.t / 4)
 
+        self.t += self.dt
 
-class ControlledNeuralSystem(mx.gluon.HybridBlock):
+        return observation, reward, done, {}
 
-    def __init__(self, neuralsystem: RnnModel, controller: RnnModel, context,
-                 batch_size, **kwargs):
-        super().__init__(**kwargs)
-        self.neuralsystem = neuralsystem
-        self.controller = controller
-        self.context = context
-        self.batch_size = batch_size
+    def is_done(self, u):
+        cost = get_lqr_cost(self.states, u, self.Q_states, self.R,
+                            self.dt).item()
+        return cost < self.cost_threshold
 
-    def hybrid_forward(self, F, x, **kwargs):
-        neuralsystem_states, controller_states = self.begin_state(F)
-        neuralsystem_outputs = []
-        for neuralsystem_input in x:
-            if F is mx.ndarray:
-                neuralsystem_input = F.expand_dims(neuralsystem_input, 0)
-            controller_output, controller_states = self.controller(
-                neuralsystem_states[0], controller_states)
-            neuralsystem_output, neuralsystem_states = self.neuralsystem(
-                neuralsystem_input,
-                [neuralsystem_states[0] + controller_output])
-            neuralsystem_outputs.append(neuralsystem_output)
-        return F.concat(*neuralsystem_outputs, dim=0)
+    def reset(self, state_init=None):
 
-    def readout(self, F, x):
-        return (F.dot(x, self.controller.rnn.l0_i2h_weight.data().T)
-                + self.controller.rnn.l0_i2h_bias.data())
+        self.states = state_init or self.init_state_space.sample()
+        action = 0
 
-    def readin(self, F, x):
-        return (F.dot(x, self.controller.decoder.weight.data().T) +
-                self.controller.decoder.bias.data())
+        self.t = 0
 
-    def begin_state(self, F):
-        kwargs = {'batch_size': self.batch_size, 'func': F.zeros,
-                  'ctx': self.context}
-        return (self.neuralsystem.rnn.begin_state(**kwargs),
-                self.controller.rnn.begin_state(**kwargs))
+        observation = self.process.output(self.t, self.states, action)
 
-    def add_noise(self, where, sigma, dt, rng: np.random.Generator):
-        if where in (None, 'None', 'none', ''):
-            return
-        elif where == 'sensor':
-            parameters = self.neuralsystem.rnn.l0_i2h_weight
-        elif where == 'processor':
-            parameters = self.neuralsystem.rnn.l0_h2h_weight
-        elif where == 'actuator':
-            parameters = self.neuralsystem.decoder.weight
-        else:
-            raise NotImplementedError
-        w = parameters.data().asnumpy()
-        noise = rng.standard_normal(w.shape) * sigma * np.sqrt(dt)
-        parameters.data()[:] = w + noise
+        x = observation if self.use_observations_in_cost else self.states
+        self.cost = self.get_cost(x, action)
 
-    def get_reg_weights(self):
-        return [self.controller.decoder.weight,
-                self.controller.rnn.l0_i2h_weight]
+        return observation
 
-    def sparsify(self, atol):
-        weight_list = self.get_reg_weights()
-        for weights in weight_list:
-            idxs = np.nonzero(weights.data().abs().asnumpy() < atol)
-            if len(idxs[0]):
-                weights.data()[idxs] = 0
-
-
-class ClosedControlledNeuralSystem(ControlledNeuralSystem):
-    def __init__(self, environment: DIMx, neuralsystem: RnnModel,
-                 controller: RnnModel, context, batch_size, num_steps: int,
-                 **kwargs):
-        super().__init__(neuralsystem, controller, context, batch_size,
-                         **kwargs)
-        self.environment = environment
-        self.num_steps = num_steps
-
-    def hybrid_forward(self, F, x, **kwargs):
-        _, neuralsystem_states, controller_states = self.begin_state(F)
-        environment_states = x
-        neuralsystem_output = \
-            F.zeros((1, self.batch_size, self.environment.num_inputs),
-                    ctx=self.context)
-        neuralsystem_outputs = []
-        environment_state_list = []
-        for _ in range(self.num_steps):
-            environment_output, environment_states = self.environment(
-                environment_states, neuralsystem_output)
-            controller_output, controller_states = self.controller(
-                neuralsystem_states[0], controller_states)
-            neuralsystem_output, neuralsystem_states = self.neuralsystem(
-                environment_output,
-                [neuralsystem_states[0] + controller_output])
-            neuralsystem_outputs.append(neuralsystem_output)
-            environment_state_list.append(environment_states)
-        return (F.concat(*neuralsystem_outputs, dim=0),
-                F.concat(*environment_state_list, dim=0))
-
-    def begin_state(self, F):
-        environment_states = self.environment.begin_state(self.batch_size,
-                                                          self.context, F)
-        return (environment_states,) + super().begin_state(F)
+    def render(self, mode='human'):
+        if mode != 'console':
+            raise NotImplementedError()
+        logging.info("States: ", self.states, "\tCost: ", self.cost)
