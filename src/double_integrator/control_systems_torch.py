@@ -405,14 +405,17 @@ class Gramians(nn.Module):
         self.num_inputs = self.model.controller.num_hidden
         self.num_hidden = self.model.neuralsystem.hidden_size
         self.num_outputs = self.model.controller.num_hidden
+        if hasattr(self.environment, 'action_space'):
+            self.num_controls = self.environment.action_space.shape[0]
+        else:
+            self.num_controls = self.environment.process.num_inputs
         self._return_observations = None
 
     def forward(self, x, h):
         self.environment.reset()
         neuralsystem_states = h
-        neuralsystem_output = \
-            torch.zeros(1, 1, self.environment.process.num_inputs,
-                        dtype=self.dtype, device=self.device)
+        neuralsystem_output = torch.zeros(1, 1, self.num_controls,
+                                          dtype=self.dtype, device=self.device)
         outputs = []
         for t in np.arange(0, self.T, self.dt):
             ut = torch.tensor(np.expand_dims(x(t), (0, 1)), dtype=self.dtype,
@@ -420,8 +423,8 @@ class Gramians(nn.Module):
             environment_output = self.environment.step(
                 neuralsystem_output.cpu().numpy())[0]
             neuralsystem_states, neuralsystem_states = self.model.neuralsystem(
-                torch.tensor(environment_output, dtype=self.dtype,
-                             device=self.device).unsqueeze(0),
+                torch.atleast_3d(torch.tensor(
+                    environment_output, dtype=self.dtype, device=self.device)),
                 neuralsystem_states + self.model.readin(ut))
             neuralsystem_output = self.decoder(neuralsystem_states)
             if self._return_observations:
