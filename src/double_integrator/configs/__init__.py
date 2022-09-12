@@ -25,6 +25,7 @@ from src.double_integrator.configs import (
     config_train_rnn,
     config_train_rnn_controller,
     config_train_rnn_controller_rl,
+    config_train_rnn_controller_rl_nonlinear,
     config_train_rnn_reinforce,
     config_train_mlp_lqr_reinforce,
     config_train_rnn_lqr_reinforce,

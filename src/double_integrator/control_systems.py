@@ -140,7 +140,7 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
             if self.W is not None and not deterministic:
                 dW = get_additive_white_gaussian_noise(
                     np.eye(len(x), dtype=self.dtype) * np.sqrt(self.dt),
-                    rng=self.rng, dtype=self.dtype)
+                    rng=self.rng)
                 x_new += np.dot(self.W, dW)
             return x_new
         else:
