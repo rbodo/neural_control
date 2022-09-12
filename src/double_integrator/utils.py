@@ -132,39 +132,16 @@ class Monitor:
 
 
 def get_additive_white_gaussian_noise(cov, size=None, rng=None,
-                                      method='cholesky', dtype='float32'):
-    if rng is None:
-        rng = np.random.default_rng()
-
-    return get_gaussian_noise(np.zeros(len(cov), dtype), cov, size, rng,
+                                      method='cholesky'):
+    return get_gaussian_noise(np.zeros(len(cov), cov.dtype), cov, size, rng,
                               method)
 
 
-def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky',
-                       dtype=None):
+def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky'):
     if rng is None:
         rng = np.random.default_rng()
-    if dtype is None:
-        dtype = 'float32'
 
-    # Check for off-diagonal terms. If components are independent, can use more
-    # efficient computation.
-    is_correlated = np.count_nonzero(cov - np.diag(np.diagonal(cov))) > 0
-    if is_correlated:  # Expensive
-        return rng.multivariate_normal(mean, cov, size, method=method,
-                                       dtype=dtype)
-
-    # Use one-dimensional standard normal distribution (cheaper). Have to
-    # account for possible shape specifications.
-    if size is None:
-        return mean + rng.standard_normal(dtype=dtype) * np.diagonal(cov)
-    elif isinstance(size, int):
-        return np.expand_dims(mean, 0) + \
-               np.outer(rng.standard_normal(size, dtype), np.diagonal(cov))
-    else:
-        return np.expand_dims(mean, 0) + \
-               np.expand_dims(rng.standard_normal(size, dtype), -1) * \
-               np.diagonal(cov)
+    return rng.multivariate_normal(mean, cov, size, method=method)
 
 
 def get_initial_states(mean, cov, num_states, n=1, rng=None, dtype='float32'):
