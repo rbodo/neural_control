@@ -46,7 +46,7 @@ def plot_timeseries(df, path=None):
 def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
                        start_points=None, n=10, xt=None, rng=None, path=None,
                        show=True, xlim=None, ylim=None, fig=None,
-                       line_label=None):
+                       line_label=None, draw_endpoints=False):
 
     assert len(state_dict) == 2, "Two dimensions required for phase plot."
     labels = list(state_dict.keys())
@@ -65,6 +65,11 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
     # Draw target state.
     if xt is not None:
         plt.scatter(xt[0], xt[1], s=32, marker='o')
+
+    # Draw endpoints.
+    if draw_endpoints:
+        plt.scatter(states[i][0], states[j][0], s=32, marker='x')
+        plt.scatter(states[i][-1], states[j][-1], s=32, marker='o')
 
     # Draw vector field.
     if odefunc is not None:
