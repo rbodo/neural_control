@@ -6,7 +6,7 @@ import control
 import numpy as np
 import mxnet as mx
 
-from scratch.configs.config import get_config
+from examples.configs.config import get_config
 from scratch._deprecated.di_open import DI
 from src.control_systems_mxnet import RnnModel
 from scratch._deprecated.utils import (

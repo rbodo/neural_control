@@ -8,7 +8,7 @@ from yacs.config import CfgNode
 
 from scratch import configs
 from scratch.di_rnn import add_variables
-from scratch.hyperparameter_rnn_ppo import run_single
+from examples.linear_rnn_rl import run_single
 from src.control_systems import DiLqg
 from src.control_systems_torch import DiGym
 from src.plotting import plot_cost, plot_trajectories

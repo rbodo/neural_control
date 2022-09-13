@@ -7,7 +7,7 @@ import mxnet as mx
 from src.control_systems_mxnet import DiRnn
 from scratch.di_rnn import run_single, add_variables
 from src.plotting import plot_phase_diagram
-from scratch.train_rnn_controller import get_model
+from examples.linear_rnn_lqr import get_model
 from src.utils import Monitor
 
 GPU = 2

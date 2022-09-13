@@ -1,6 +1,6 @@
 import os
 
-from scratch import configs
+from examples import configs
 from src.utils import apply_timestamp
 
 

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Union
 
 import numpy as np
@@ -6,6 +7,7 @@ import gym
 from gym import spaces
 import torch
 from torch import nn
+from yacs.config import CfgNode
 
 from py.emgr import emgr
 from src.utils import get_lqr_cost
@@ -452,3 +454,10 @@ class Gramians(nn.Module):
     def compute_observability(self):
         self._return_observations = True
         return self.compute_gramian('o')
+
+
+def get_device(config: CfgNode) -> torch.device:
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.GPU
+    # Always set GPU ID to 0 here because we allow only one visible device in
+    # the environment variable.
+    return torch.device('cpu' if not config.GPU else 'cuda:0')

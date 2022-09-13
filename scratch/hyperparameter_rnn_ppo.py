@@ -3,146 +3,22 @@ import logging
 import sys
 import os
 import warnings
-from typing import Callable
 
 import mlflow
 import numpy as np
 from gym.wrappers import TimeLimit
-from matplotlib import pyplot as plt
-# from stable_baselines3 import PPO, SAC
 import optuna
 from optuna.exceptions import ExperimentalWarning
 from optuna.integration.mlflow import MLflowCallback, RUN_ID_ATTRIBUTE_KEY
-from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.logger import Figure
 from tqdm import trange
 
+from examples.linear_rnn_rl import (FigureRecorderTest, run_single,
+                                    linear_schedule)
 from src.control_systems_torch import DiGym
 from src.plotting import plot_phase_diagram
 from src.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
 from src.utils import get_artifact_path
-
-
-def get_states(model, i_step, num_steps=1):
-    k, r = divmod(i_step, num_steps)
-    if r == 0:
-        return model.replay_buffer.observations[num_steps * (k - 1):
-                                                num_steps * k]
-
-
-class FigureRecorderTest(BaseCallback):
-    def _on_step(self) -> bool:
-        n = self.n_calls
-        env = self.locals['env'].envs[0]
-        episode_reward, episode_length = evaluate(self.model, env, 100)
-        states, rewards = run_single(env, self.model)
-        figure = plot_phase_diagram({'x': states[:, 0, 0],
-                                     'v': states[:, 0, 1]}, xt=[0, 0],
-                                    show=False, xlim=[-1, 1], ylim=[-1, 1])
-        self.logger.record('trajectory/eval', Figure(figure, close=True),
-                           exclude=('stdout', 'log', 'json', 'csv'))
-        self.logger.record('test/episode_reward', episode_reward)
-        self.logger.record('test/episode_length', episode_length)
-        mlflow.log_figure(figure, f'figures/trajectory_{n}.png')
-        mlflow.log_metric(key='test_reward', value=episode_reward, step=n)
-        mlflow.log_metric(key='test_episode_length', value=episode_length,
-                          step=n)
-        mlflow.log_metric(key='training_reward',
-                          value=self.model.ep_info_buffer[-1]['r'], step=n)
-        plt.close()
-        return True
-
-
-def evaluate(model, env, n, filename=None, deterministic=True):
-    reward_means, episode_lengths = run_n(n, env, model,
-                                          deterministic=deterministic)
-    if filename is not None:
-        states, rewards = run_single(env, model)
-        fig = plot_phase_diagram({'x': states[:, 0, 0], 'v': states[:, 0, 1]},
-                                 xt=[0, 0], show=False, xlim=[-1, 1],
-                                 ylim=[-1, 1])
-        mlflow.log_figure(fig, os.path.join('figures', filename))
-    return np.mean(reward_means).item(), np.mean(episode_lengths).item()
-
-
-def run_n(n, *args, **kwargs):
-    reward_means = []
-    episode_lengths = []
-    for i in range(n):
-        states, rewards = run_single(*args, **kwargs)
-        reward_means.append(np.sum(rewards).item())
-        episode_lengths.append(len(rewards))
-    return reward_means, episode_lengths
-
-
-def run_single(env, model, x0=None, monitor=None, deterministic=True):
-    t = 0
-    y = env.reset(state_init=x0)
-    x = env.states.cpu().numpy()
-
-    # cell and hidden state of the LSTM
-    lstm_states = None
-    num_envs = 1
-    # Episode start signals are used to reset the lstm states
-    episode_starts = np.ones((num_envs,), dtype=bool)
-    states = []
-    rewards = []
-    while True:
-        u, lstm_states = model.predict(y, state=lstm_states,
-                                       episode_start=episode_starts,
-                                       deterministic=deterministic)
-        states.append(x)
-        if monitor is not None:
-            monitor.update_variables(t, states=x, outputs=y, control=u,
-                                     cost=env.cost)
-
-        y, reward, done, info = env.step(u)
-        rewards.append(reward)
-        x = env.states.cpu().numpy()
-        t += env.process.dt
-        episode_starts = done
-        if done:
-            env.reset()
-            break
-    # logging.info(f"Final reward: {reward}")
-    return np.expand_dims(states, 1), rewards
-
-
-def eval_mlp(env, model):
-    x = env.reset()
-    states = []
-    while True:
-        u, _ = model.predict(x, deterministic=True)
-        x, reward, done, info = env.step(u)
-        states.append(env.states)
-        if done:
-            env.reset()
-            break
-    logging.info(f"Final reward: {reward}")
-    return np.array(states)
-
-
-def linear_schedule(initial_value: float,
-                    q: float = 0.01) -> Callable[[float], float]:
-    """
-    Linear learning rate schedule.
-
-    :param initial_value: Initial learning rate.
-    :param q: Fraction of initial learning rate at end of progress.
-    :return: schedule that computes
-      current learning rate depending on remaining progress
-    """
-    def func(progress_remaining: float) -> float:
-        """
-        Progress will decrease from 1 (beginning) to 0.
-
-        :param progress_remaining:
-        :return: current learning rate
-        """
-        return initial_value * (progress_remaining * (1 - q) + q)
-
-    return func
 
 
 # noinspection PyProtectedMember

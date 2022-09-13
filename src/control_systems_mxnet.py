@@ -1,8 +1,11 @@
+import os
+
 import mxnet as mx
 import numpy as np
+from yacs.config import CfgNode
 
 from py.emgr import emgr
-from src.control_systems import LQE, DI
+from src import control_systems
 from src.utils import get_lqr_cost
 from scratch.ff_pid.pid import PID
 
@@ -26,23 +29,25 @@ class MlpModel(mx.gluon.HybridBlock):
 
 class RnnModel(mx.gluon.HybridBlock):
 
-    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
+    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, num_inputs=1,
                  activation_rnn=None, activation_decoder=None, **kwargs):
 
         super().__init__(**kwargs)
 
+        self.num_inputs = num_inputs
         self.num_hidden = num_hidden
         self.num_layers = num_layers
+        self.num_outputs = num_outputs
 
         with self.name_scope():
             if self.num_layers == 1 and activation_rnn == 'linear':
                 self.rnn = mx.gluon.rnn.RNNCell(num_hidden,
                                                 mx.gluon.nn.LeakyReLU(1),
-                                                input_size=input_size)
+                                                input_size=num_inputs)
             else:
                 self.rnn = mx.gluon.rnn.RNN(
                     num_hidden, num_layers, activation_rnn,
-                    input_size=input_size, prefix='rnn_')
+                    input_size=num_inputs, prefix='rnn_')
             self.decoder = mx.gluon.nn.Dense(
                 num_outputs, activation=activation_decoder,
                 in_units=num_hidden, flatten=False, prefix='decoder_')
@@ -136,7 +141,7 @@ class StochasticLinearIOSystem(mx.gluon.HybridBlock):
         return self.output(F, x, u, **kwargs), x
 
 
-class Di(StochasticLinearIOSystem):
+class DI(StochasticLinearIOSystem):
     def __init__(self, num_inputs, num_outputs, num_states, context, var_x=0,
                  var_y=0, dt=0.1, dtype='float32', **kwargs):
 
@@ -323,7 +328,7 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
 
 
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
-    def __init__(self, environment: Di, neuralsystem: RnnModel,
+    def __init__(self, environment: DI, neuralsystem: RnnModel,
                  controller: RnnModel, context, batch_size, num_steps: int,
                  **kwargs):
         super().__init__(neuralsystem, controller, context, batch_size,
@@ -429,7 +434,7 @@ class LqeMlp:
     def __init__(self, process, q=0.5, r=0.5, path_model=None,
                  model_kwargs=None):
         self.process = process
-        self.estimator = LQE(self.process)
+        self.estimator = control_systems.LQE(self.process)
         self.control = MLP(self.process, q, r, path_model, model_kwargs)
 
     def step(self, t, x, x_est, Sigma):
@@ -453,7 +458,7 @@ class LqeRnn:
                  model_kwargs=None, dtype='float32'):
         self.process = process
         self.dtype = dtype
-        self.estimator = LQE(self.process)
+        self.estimator = control_systems.LQE(self.process)
         self.control = RNN(self.process, q, r, path_model, model_kwargs)
 
     def step(self, t, x, x_rnn, x_est, Sigma):
@@ -479,8 +484,8 @@ class DiMlp(MLP):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
+        process = control_systems.DI(num_inputs, num_outputs, num_states,
+                                     var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs)
 
 
@@ -491,8 +496,8 @@ class DiPidRnn(PidRnn):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
+        process = control_systems.DI(num_inputs, num_outputs, num_states,
+                                     var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs, gpu, k_p,
                          k_i, k_d)
 
@@ -503,8 +508,8 @@ class DiRnn(RNN):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
+        process = control_systems.DI(num_inputs, num_outputs, num_states,
+                                     var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs, gpu)
 
 
@@ -514,8 +519,8 @@ class DiLqeMlp(LqeMlp):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
+        process = control_systems.DI(num_inputs, num_outputs, num_states,
+                                     var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs)
 
 
@@ -525,13 +530,13 @@ class DiLqeRnn(LqeRnn):
         num_inputs = 1
         num_outputs = 1
         num_states = 2
-        process = DI(num_inputs, num_outputs, num_states,
-                     var_x, var_y, dt, rng)
+        process = control_systems.DI(num_inputs, num_outputs, num_states,
+                                     var_x, var_y, dt, rng)
         super().__init__(process, q, r, path_model, model_kwargs)
 
 
 class Masker:
-    def __init__(self, model: 'ClosedControlledNeuralSystem', p,
+    def __init__(self, model: 'ControlledNeuralSystem', p,
                  rng: np.random.Generator):
         self.model = model
         self.p = p
@@ -549,10 +554,12 @@ class Masker:
 
 
 class Gramians(mx.gluon.HybridBlock):
-    def __init__(self, model: 'ClosedControlledNeuralSystem', context, dt, T,
+    def __init__(self, model: 'ControlledNeuralSystem',
+                 environment: StochasticLinearIOSystem, context, dt, T,
                  **kwargs):
         super().__init__(**kwargs)
         self.model = model
+        self.environment = environment
         self.context = context
         self.dt = dt
         self.T = T
@@ -562,15 +569,14 @@ class Gramians(mx.gluon.HybridBlock):
         self._return_observations = None
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        environment_states = \
-            self.model.environment.begin_state(1, self.context, F)
+        environment_states = self.environment.begin_state(1, self.context, F)
         neuralsystem_states = [args[0]]
         neuralsystem_output = \
-            F.zeros((1, 1, self.model.environment.num_inputs), self.context)
+            F.zeros((1, 1, self.environment.num_inputs), self.context)
         outputs = []
         for t in np.arange(0, self.T, self.dt):
             ut = F.array(np.expand_dims(x(t), (0, 1)), self.context)
-            environment_output, environment_states = self.model.environment(
+            environment_output, environment_states = self.environment(
                 environment_states, neuralsystem_output)
             neuralsystem_output, neuralsystem_states = self.model.neuralsystem(
                 environment_output,
@@ -637,3 +643,10 @@ class LQRLoss(mx.gluon.loss.Loss):
                 return F.npx.batch_flatten(loss).mean(axis=1)
         else:
             return F.mean(loss, axis=self._batch_axis, exclude=True)
+
+
+def get_device(config: CfgNode) -> mx.context:
+    # Disable an irrelevant cudnn library warning.
+    os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
+
+    return mx.gpu(config.GPU) if mx.context.num_gpus() > 0 else mx.cpu()

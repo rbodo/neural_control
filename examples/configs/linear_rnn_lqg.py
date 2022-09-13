@@ -8,21 +8,19 @@ def get_config():
     config = configs.config.get_config()
 
     config.GPU = 8
-    config.EXPERIMENT_NAME = 'linear_rnn_rl'
+    config.EXPERIMENT_NAME = 'linear_rnn_lqg'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
     config.paths.BASE_PATH = base_path
-
-    config.simulation.NUM_STEPS = 300
-    config.simulation.T = config.simulation.NUM_STEPS / 10
+    config.paths.FILEPATH_INPUT_DATA = \
+        os.path.abspath(os.path.join(base_path, '..', 'lqr_grid.pkl'))
 
     config.process.PROCESS_NOISE = 0.01
-    config.process.OBSERVATION_NOISE = 0.1
+    config.process.OBSERVATION_NOISE = 0  # Fully observable, noiseless
 
-    config.training.NUM_EPOCHS = 5e5
-    config.training.BATCH_SIZE = None
-    config.training.LEARNING_RATE = 2e-4
+    config.training.NUM_EPOCHS = 10
+    config.training.BATCH_SIZE = 32
 
     config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 50
@@ -34,8 +32,8 @@ def get_config():
     config.perturbation.SKIP_PERTURBATION = False
     config.perturbation.PERTURBATION_TYPES = \
         ['sensor', 'actuator', 'processor']
-    config.perturbation.PERTURBATION_LEVELS = [0.5]  # , 1, 2]  # Todo: Adapt per perturbation type
-    config.perturbation.DROPOUT_PROBABILITIES = [0.1]  # [0, 0.1, 0.5, 0.7, 0.9]
+    config.perturbation.PERTURBATION_LEVELS = [0.5, 1, 2]  # Todo: Adapt per perturbation type
+    config.perturbation.DROPOUT_PROBABILITIES = [0]  # , 0.1, 0.5, 0.7, 0.9]
 
     config.SEEDS = [42]  # , 234]
 

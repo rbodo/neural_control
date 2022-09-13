@@ -5,7 +5,7 @@ from collections import OrderedDict
 import control
 import numpy as np
 
-from scratch.configs.config import get_config
+from examples.configs.config import get_config
 from scratch._deprecated.utils import (
     process_dynamics, process_output, DIMENSION_MAP, plot_timeseries)
 from src.utils import get_initial_states

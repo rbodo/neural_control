@@ -1,12 +1,13 @@
 import os
 
-from scratch import configs
+from examples import configs
+from scratch.configs import config_collect_ood_data
 from src.utils import apply_timestamp
 
 
 def get_config(timestamp_workdir=None):
     config = configs.config.get_config()
-    config2 = configs.config_collect_ood_data.get_config()
+    config2 = config_collect_ood_data.get_config()
 
     base_path = \
         '/home/bodrue/Data/neural_control/double_integrator/lqg/generalization'

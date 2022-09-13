@@ -4,15 +4,15 @@ import sys
 import numpy as np
 import mxnet as mx
 
-from scratch import configs
-from scratch.train_rnn_controller import get_model
-from src.control_systems_mxnet import Di, ClosedControlledNeuralSystem
+from examples import configs
+from examples.linear_rnn_lqr import get_model
+from src.control_systems_mxnet import DI, ClosedControlledNeuralSystem
 from src.plotting import plot_phase_diagram
 
 GPU = 2
 os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
 context = mx.gpu(GPU) if mx.context.num_gpus() > 0 else mx.cpu()
-config = configs.config_train_rnn_controller.get_config()
+config = configs.linear_rnn_lqr.get_config()
 T = config.simulation.T
 num_steps = config.simulation.NUM_STEPS
 dt = T / num_steps
@@ -25,7 +25,7 @@ path_model = '/home/bodrue/Data/neural_control/double_integrator/' \
              'rnn_controller/rnn.params'
 model = get_model(config, context, freeze_neuralsystem=False,
                   freeze_controller=True, load_weights_from=path_model)
-environment = Di(1, 1, 2, context, process_noise, observation_noise, dt,
+environment = DI(1, 1, 2, context, process_noise, observation_noise, dt,
                  prefix='environment_')
 model_closed = ClosedControlledNeuralSystem(
     environment, model.neuralsystem, model.controller, context, batch_size,

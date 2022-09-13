@@ -5,7 +5,7 @@ from collections import OrderedDict
 import control
 import numpy as np
 
-from scratch.configs.config import get_config
+from examples.configs.config import get_config
 from scratch._deprecated.di_lqr import DiLqr
 from scratch._deprecated.utils import (
     process_dynamics, process_output, StochasticInterconnectedSystem,

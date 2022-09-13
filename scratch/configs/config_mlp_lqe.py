@@ -2,14 +2,14 @@ import os
 
 from yacs.config import CfgNode
 
-from scratch import configs
+from examples import configs
+from scratch.configs import config_collect_training_data
 from src.utils import apply_timestamp
 
 
 def get_config(timestamp_workdir=None):
     config = configs.config.get_config()
-    config2 = \
-        configs.config_collect_training_data.get_config(timestamp_workdir)
+    config2 = config_collect_training_data.get_config(timestamp_workdir)
 
     base_path = '/home/bodrue/Data/neural_control/double_integrator/mlp_lqe'
     base_path = apply_timestamp(base_path, timestamp_workdir)

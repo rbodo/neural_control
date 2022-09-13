@@ -9,7 +9,7 @@ def get_config() -> CfgNode:
 
     config.SEED = 42
     config.paths = CfgNode()
-    config.paths.PATH_FIGURES = './'  # Where to save plots
+    config.paths.PATH_FIGURES = '../../scratch/configs/'  # Where to save plots
     config.paths.FILEPATH_INPUT_DATA = ''  # Location of input data
     config.paths.FILEPATH_OUTPUT_DATA = ''  # Where to save output data
     config.paths.FILEPATH_MODEL = ''

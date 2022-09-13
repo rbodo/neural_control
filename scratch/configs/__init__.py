@@ -1,5 +1,4 @@
 from scratch.configs import (
-    config,
     config_collect_lqr_data,
     config_collect_ood_data,
     config_collect_training_data,
@@ -23,7 +22,6 @@ from scratch.configs import (
     config_test_rnn_ood,
     config_test_rnn_small,
     config_train_rnn,
-    config_train_rnn_controller,
     config_train_rnn_reinforce,
     config_train_mlp_lqr_reinforce,
     config_train_rnn_lqr_reinforce,
