@@ -1,3 +1,15 @@
+"""
+sb3_contrib.common.recurrent.policies.RecurrentActorCriticPolicy adapted to
+use vanilla (Elman) RNNs rather than gated LSTM units.
+
+Main changes are the removal of the second cell state, and the use of
+``nn.RNN`` instead of ``nn.LSTM`` for the actor and critic networks.
+
+Also, we added an argument to the Policy constructor that allows coupling the
+actor network with a controller (to stabilize the actor in the presence of
+perturbations).
+"""
+
 import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Type, Union, Tuple, NamedTuple, \

@@ -1,5 +1,5 @@
 import logging
-from typing import Union
+from typing import Union, Optional
 
 import control
 import numpy as np
@@ -8,113 +8,6 @@ from gym import spaces
 
 from src.utils import (get_lqr_cost, get_initial_states,
                        get_additive_white_gaussian_noise)
-
-
-class LQR:
-    def __init__(self, process, q=0.5, r=0.5, dtype='float32',
-                 normalize_cost=False):
-
-        self.process = process
-        self.dtype = dtype
-        self.normalize_cost = normalize_cost
-
-        # State cost matrix:
-        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
-
-        # Control cost matrix:
-        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
-
-        # Feedback gain matrix:
-        self.K = self.get_feedback_gain()
-
-    def get_feedback_gain(self):
-        # Solve LQR. Returns state feedback gain K, solution S to Riccati
-        # equation, and eigenvalues E of closed-loop system.
-        K, S, E = control.lqr(self.process.A, self.process.B, self.Q, self.R)
-        return K
-
-    def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
-                            normalize=self.normalize_cost)
-
-    def get_control(self, x):
-        return -self.K.dot(x)
-
-    def step(self, t, x):
-        u = self.get_control(x)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        c = self.get_cost(x, u)
-
-        return x, y, u, c
-
-    # noinspection PyUnusedLocal
-    def dynamics(self, t, x, u):
-        u = self.get_control(x)
-
-        return self.process.dynamics(t, x, u)
-
-
-class LQE:
-    def __init__(self, process, dtype='float32'):
-
-        self.process = process
-        self.dtype = dtype
-
-        # Kalman gain matrix:
-        self.L = self.get_Kalman_gain()
-
-    def get_Kalman_gain(self):
-        # Solve LQE. Returns Kalman estimator gain L, solution P to Riccati
-        # equation, and eigenvalues F of estimator poles A-LC.
-        L, P, F = control.lqe(self.process.A,
-                              np.eye(len(self.process.A), dtype=self.dtype),
-                              self.process.C,
-                              self.process.W,
-                              self.process.V)
-        return L
-
-    def step(self, t, mu, Sigma, u, y, asymptotic=True):
-        mu = self.process.step(t, mu, u, deterministic=True)
-
-        if asymptotic:
-            L = self.L
-        else:
-            A = self.process.A
-            C = self.process.C
-            V = self.process.V
-            W = self.process.W
-            Sigma = A @ Sigma @ A.T + W
-            L = Sigma @ C.T @ np.linalg.inv(C @ Sigma @ C.T + V)
-            Sigma = (1 - L @ C) @ Sigma
-
-        mu += self.process.dt * L @ (y - self.process.output(t, mu, u, True))
-
-        return mu, Sigma
-
-
-class LQG:
-    def __init__(self, process, q=0.5, r=0.5, normalize_cost=False):
-        self.process = process
-        self.estimator = LQE(self.process)
-        self.control = LQR(self.process, q, r, normalize_cost=normalize_cost)
-
-    def step(self, t, x, x_est, Sigma):
-        u = self.control.get_control(x_est)
-        x = self.process.step(t, x, u)
-        y = self.process.output(t, x, u)
-        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
-        c = self.control.get_cost(x, u)
-
-        return x, y, u, c, x_est, Sigma
-
-    # noinspection PyUnusedLocal
-    def dynamics(self, t, x, u):
-        # Skipping estimator step here, because this method is only evaluated
-        # for one time step to draw vector field.
-        u = self.control.get_control(x)
-
-        return self.process.dynamics(t, x, u)
 
 
 class StochasticLinearIOSystem(control.LinearIOSystem):
@@ -131,6 +24,9 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         self.V = V
         self.rng = rng
         self.dtype = kwargs['dtype'] if 'dtype' in kwargs else 'float32'
+        self.num_inputs = linsys.ninputs
+        self.num_states = linsys.nstates
+        self.num_outputs = linsys.noutputs
 
     def step(self, t, x, u, method='euler-maruyama', deterministic=False):
         dxdt = super().dynamics(t, x, u).astype(self.dtype)
@@ -159,10 +55,127 @@ class StochasticLinearIOSystem(control.LinearIOSystem):
         return get_initial_states(mu, Sigma, len(self.A), n, self.rng)
 
 
+class LQR:
+    """Linear Quadratic Regulator."""
+    def __init__(self, process: StochasticLinearIOSystem,
+                 q: Optional[float] = 0.5, r: Optional[float] = 0.5,
+                 dtype: Optional[str] = 'float32',
+                 normalize_cost: Optional[bool] = False):
+
+        self.process = process
+        self.dtype = dtype
+        self.normalize_cost = normalize_cost
+
+        # State cost matrix:
+        self.Q = q * np.eye(self.process.num_states, dtype=self.dtype)
+
+        # Control cost matrix:
+        self.R = r * np.eye(self.process.num_inputs, dtype=self.dtype)
+
+        # Feedback gain matrix:
+        self.K = self.get_feedback_gain()
+
+    def get_feedback_gain(self):
+        """Solve LQR.
+
+        Returns state feedback gain K, solution S to Riccati equation, and
+        eigenvalues E of closed-loop system.
+        """
+        K, S, E = control.lqr(self.process.A, self.process.B, self.Q, self.R)
+        return K
+
+    def get_cost(self, x, u):
+        return get_lqr_cost(x, u, self.Q, self.R, self.process.dt,
+                            normalize=self.normalize_cost)
+
+    def get_control(self, x):
+        return -self.K.dot(x)
+
+    def step(self, t, x):
+        u = self.get_control(x)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        c = self.get_cost(x, u)
+
+        return x, y, u, c
+
+    # noinspection PyUnusedLocal
+    def dynamics(self, t, x, u):
+        u = self.get_control(x)
+
+        return self.process.dynamics(t, x, u)
+
+
+class LQE:
+    """Linear Quadratic Estimator."""
+    def __init__(self, process, dtype='float32'):
+        self.process = process
+        self.dtype = dtype
+
+        # Kalman gain matrix:
+        self.L = self.get_Kalman_gain()
+
+    def get_Kalman_gain(self):
+        """Solve LQE.
+
+        Returns Kalman estimator gain L, solution P to Riccati equation, and
+        eigenvalues F of estimator poles A-LC.
+        """
+        L, P, F = control.lqe(self.process.A,
+                              np.eye(len(self.process.A), dtype=self.dtype),
+                              self.process.C,
+                              self.process.W,
+                              self.process.V)
+        return L
+
+    def step(self, t, mu, Sigma, u, y, asymptotic=True):
+        mu = self.process.step(t, mu, u, deterministic=True)
+
+        if asymptotic:
+            L = self.L
+        else:
+            A = self.process.A
+            C = self.process.C
+            V = self.process.V
+            W = self.process.W
+            Sigma = A @ Sigma @ A.T + W
+            L = Sigma @ C.T @ np.linalg.inv(C @ Sigma @ C.T + V)
+            Sigma = (1 - L @ C) @ Sigma
+
+        mu += self.process.dt * L @ (y - self.process.output(t, mu, u, True))
+
+        return mu, Sigma
+
+
+class LQG:
+    """Linear Quadratic Gaussian."""
+    def __init__(self, process, q=0.5, r=0.5, normalize_cost=False):
+        self.process = process
+        self.estimator = LQE(self.process)
+        self.control = LQR(self.process, q, r, normalize_cost=normalize_cost)
+
+    def step(self, t, x, x_est, Sigma):
+        u = self.control.get_control(x_est)
+        x = self.process.step(t, x, u)
+        y = self.process.output(t, x, u)
+        x_est, Sigma = self.estimator.step(t, x_est, Sigma, u, y)
+        c = self.control.get_cost(x, u)
+
+        return x, y, u, c, x_est, Sigma
+
+    # noinspection PyUnusedLocal
+    def dynamics(self, t, x, u):
+        # Skipping estimator step here, because this method is only evaluated
+        # for one time step to draw vector field.
+        u = self.control.get_control(x)
+
+        return self.process.dynamics(t, x, u)
+
+
 class DI(StochasticLinearIOSystem):
+    """Double integrator dynamical system."""
     def __init__(self, num_inputs, num_outputs, num_states, var_x=0., var_y=0.,
                  dt=0.1, rng=None, **kwargs):
-
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
         self.num_states = num_states
@@ -193,6 +206,7 @@ class DI(StochasticLinearIOSystem):
 
 
 class DiOpen:
+    """Double integrator in open loop."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None):
         num_inputs = 1
         num_outputs = 2
@@ -202,6 +216,7 @@ class DiOpen:
 
 
 class DiLqr(LQR):
+    """Double integrator with LQR control."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5):
         num_inputs = 1
         num_outputs = 2
@@ -212,6 +227,7 @@ class DiLqr(LQR):
 
 
 class DiLqg(LQG):
+    """Double integrator with LQG control."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  normalize_cost=False):
         num_inputs = 1
@@ -223,7 +239,7 @@ class DiLqg(LQG):
 
 
 class DiGym(gym.Env):
-    """Custom environment that follows gym interface."""
+    """Double integrator that follows the gym interface."""
 
     metadata = {'render.modes': ['console']}
 
@@ -268,7 +284,7 @@ class DiGym(gym.Env):
         self.t = None
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt).item()
+        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
 
     def step(self, action):
 
@@ -291,8 +307,7 @@ class DiGym(gym.Env):
         return observation, reward, done, {}
 
     def is_done(self, u):
-        cost = get_lqr_cost(self.states, u, self.Q_states, self.R,
-                            self.dt).item()
+        cost = get_lqr_cost(self.states, u, self.Q_states, self.R, self.dt)
         return cost < self.cost_threshold
 
     def reset(self, state_init=None):

@@ -3,12 +3,15 @@ import os
 import sys
 import time
 from abc import ABC, abstractmethod
+from typing import Optional, Union
 
 import mlflow
 import mxnet as mx
 import numpy as np
 import pandas as pd
 from mxnet import autograd
+import torch
+from torch.utils.data import DataLoader
 from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 from yacs.config import CfgNode
@@ -18,31 +21,121 @@ from src.plotting import plot_phase_diagram
 from src.utils import get_artifact_path, get_data_loaders
 from src.control_systems_mxnet import (RnnModel, DI, Gramians, LQRLoss,
                                        ClosedControlledNeuralSystem, Masker,
-                                       get_device)
+                                       get_device, ControlledNeuralSystem)
 
 
 class NeuralPerturbationPipeline(ABC):
-    def __init__(self, config: CfgNode, data_dict: dict = None):
+    """Base class for pipeline objects.
+
+    Methods
+    -------
+    main
+        Sweeps over various perturbation types and levels, degrees of
+        controllability and observability, and random seeds. Each iteration,
+        a controller RNN is trained to maintain performance of a perturbed
+        neural system while solving a task in a dynamic environment.
+
+    All other methods need to be overwritten, namely a method to create, train,
+    and evaluate the model.
+
+    Notes
+    -----
+    The objective is to train a neural system (represented e.g. by an RNN) to
+    solve a task in a dynamical environment (e.g. inverted pendulum). The
+    trained neural system is then perturbed (e.g. degradation of sensory,
+    association, or actuator populations). An external controller is interfaced
+    with the neural system via readout and stimulation connections. The
+    controller is trained to compensate for any performance loss by providing
+    feedback to the neural system.
+
+    Here we consider the following training strageties for the neural system
+    and controller:
+
+    - Direct training on some convex cost function (e.g. LQR). Fastest and
+      cleanest, but requires knowledge of the system, full observability, and
+      for the system to be linear, differentiable and part of the computational
+      graph. Also, not all environments / tasks allow defining a suitable cost
+      function.
+    - Using the output of an optimal controller (e.g. LQR, LQG) as oracle to
+      provide the learning signal. Assumes knowledge of system and for the
+      system to be linear.
+    - Reinforcement learning. Does not assume knowledge of system, linearity,
+      or full observability.
+    """
+    def __init__(self, config: CfgNode, data_dict: Optional[dict] = None):
         self.config = config
         self.data_dict = data_dict or {}
 
     @abstractmethod
-    def get_model(self, context, freeze_neuralsystem, freeze_controller,
-                  load_weights_from: str = None):
+    def get_model(self, device: Union[torch.device, mx.context],
+                  freeze_neuralsystem: bool, freeze_controller: bool,
+                  load_weights_from: Optional[str] = None
+                  ) -> ControlledNeuralSystem:
+        """Create the model.
+
+        Parameters
+        ----------
+        device
+            Hardware backend to use (GPU / CPU).
+        freeze_neuralsystem
+            Whether to train the neural system. Usually turned off while
+            perturbing the neural system and training the controller.
+        freeze_controller
+            Whether to train the controller. Usually turned off while training
+            the neural system.
+        load_weights_from
+            Path to weights that are used to initialize the model.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def train(self, perturbation_type, perturbation_level, dropout_probability,
-              device, save_model=True, **kwargs):
+    def train(self, perturbation_type: str, perturbation_level: float,
+              dropout_probability: float,
+              device: Union[torch.device, mx.context],
+              save_model: Optional[bool] = True, **kwargs) -> dict:
+        """Train the model (consisting of a neural system and a controller).
+
+        Parameters
+        ----------
+        perturbation_type
+            Which part of the neural system to perturb. One of 'sensor',
+            'actuator', 'processor'. Will add gaussian noise to the weights of
+            the corresponding population.
+        perturbation_level
+            The weight given to the perturbation. Proportional to the standard
+            deviation of the gaussian noise distribution.
+        dropout_probability
+            Probability of dropping out a row in the readout and stimulation
+            connection matrix of the controller. Tunes the controllability and
+            observability of the neural system.
+        device
+            Hardware backend to use (GPU / CPU).
+        save_model
+            Whether to save the model in the mlflow artifact directory.
+
+        Returns
+        -------
+        results
+            A dictionary containing the performance metrics to be logged.
+        """
         raise NotImplementedError
 
-    @staticmethod
     @abstractmethod
-    def evaluate(model, data_loader, loss_function,
-                 filename=None):
+    def evaluate(self, *args, **kwargs) -> float:
+        """Evaluate model."""
         raise NotImplementedError
 
     def main(self):
+        """Run the pipeline.
+
+        Consists of two parts. First, a baseline model is trained (without
+        perturbations or external control). Then we sweep over perturbation
+        types and levels, degrees of controllability and observability, and
+        repeat for multiple random seeds.
+
+        The results are logged via mlflow.
+        """
+
         # Select hardware backend.
         device = get_device(self.config)
 
@@ -54,7 +147,7 @@ class NeuralPerturbationPipeline(ABC):
         # Train unperturbed and uncontrolled baseline model (i.e. neural system
         # controlling the double integrator environment).
         mlflow.start_run(run_name='Main')
-        out = self.train(None, 0, 0, device, **self.data_dict)
+        out = self.train('', 0, 0, device, **self.data_dict)
         dfs = [out]
 
         # Remember where the baseline model has been saved.
@@ -89,8 +182,7 @@ class NeuralPerturbationPipeline(ABC):
                         self.config.SEED = seed
                         mlflow.start_run(run_name='seed', nested=True)
                         mlflow.log_param('seed', seed)
-                        out = self.train(self.config, perturbation_type,
-                                         perturbation_level,
+                        out = self.train(perturbation_type, perturbation_level,
                                          dropout_probability, device,
                                          **self.data_dict)
                         out.update(perturbation_type=perturbation_type,
@@ -106,8 +198,9 @@ class NeuralPerturbationPipeline(ABC):
 
 
 class LqrPipeline(NeuralPerturbationPipeline):
-    def get_model(self, context, freeze_neuralsystem, freeze_controller,
-                  load_weights_from: str = None):
+    def get_model(self, device, freeze_neuralsystem, freeze_controller,
+                  load_weights_from: str = None
+                  ) -> ClosedControlledNeuralSystem:
         environment_num_states = 2
         environment_num_outputs = 2
         neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
@@ -125,7 +218,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
         dt = T / num_steps
 
         environment = DI(neuralsystem_num_outputs, environment_num_outputs,
-                         environment_num_states, context, process_noise,
+                         environment_num_states, device, process_noise,
                          observation_noise, dt, prefix='environment_')
 
         neuralsystem = RnnModel(neuralsystem_num_states,
@@ -135,7 +228,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
                                 activation_rnn, activation_decoder,
                                 prefix='neuralsystem_')
         if load_weights_from is None:
-            neuralsystem.initialize(mx.init.Xavier(), context)
+            neuralsystem.initialize(mx.init.Xavier(), device)
         if freeze_neuralsystem:
             neuralsystem.collect_params().setattr('grad_req', 'null')
 
@@ -144,15 +237,15 @@ class LqrPipeline(NeuralPerturbationPipeline):
                               activation_rnn, activation_decoder,
                               prefix='controller_')
         if load_weights_from is None:
-            controller.initialize(mx.init.Zero(), context)
+            controller.initialize(mx.init.Zero(), device)
         if freeze_controller:
             controller.collect_params().setattr('grad_req', 'null')
 
         model = ClosedControlledNeuralSystem(
-            environment, neuralsystem, controller, context, batch_size,
+            environment, neuralsystem, controller, device, batch_size,
             num_steps)
         if load_weights_from is not None:
-            model.load_parameters(load_weights_from, ctx=context)
+            model.load_parameters(load_weights_from, ctx=device)
 
         model.hybridize(active=True, static_alloc=True, static_shape=True)
 
@@ -283,8 +376,32 @@ class LqrPipeline(NeuralPerturbationPipeline):
                 'controllability': g_c, 'observability': g_o}
 
     @staticmethod
-    def evaluate(model: ClosedControlledNeuralSystem, data_loader,
-                 loss_function, filename=None):
+    def evaluate(model: ClosedControlledNeuralSystem, data_loader: DataLoader,
+                 loss_function: Union[torch.nn.Module, mx.gluon.HybridBlock],
+                 filename: Optional[str] = None) -> float:
+        """
+        Evaluate model.
+
+        Parameters
+        ----------
+        model
+            Neural system and controller. Possibly includes the differentiable
+            environment in the computational graph.
+        data_loader
+            Data loaders for train and test set. Contain trajectories in state
+            space to provide initial values or learning signal.
+        loss_function
+            Loss function used to evaluate performance. E.g. L2 or LQR.
+        filename
+            If specified, create an example phase diagram and save under given
+            name.
+
+        Returns
+        -------
+        loss
+            The average performance when evaluating `loss_function` on the
+            samples in `data_loader`.
+        """
         validation_loss = 0
         environment_states = data = None
         for data, label in data_loader:
@@ -308,7 +425,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
         return validation_loss / len(data_loader)
 
 
-def get_data(config, variable):
+def get_data(config: CfgNode, variable: str):
     """Return training and test data loader as dict.
 
     Contains trajectories of a classic LQR controller in the double integrator

@@ -23,6 +23,7 @@ def main(config):
     path = os.path.join(path_figures, 'trajectories_vs_noise.png')
     plot_trajectories_vs_noise_control(df, path, [-1, 1], [-1, 1])
 
+
 if __name__ == '__main__':
 
     _config = configs.config_di_rnn_pid.get_config('20220613_215649')

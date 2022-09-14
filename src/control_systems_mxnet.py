@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import mxnet as mx
 import numpy as np
@@ -11,7 +12,7 @@ from scratch.ff_pid.pid import PID
 
 
 class MlpModel(mx.gluon.HybridBlock):
-
+    """Multi-layer perceptron."""
     def __init__(self, num_hidden=1, num_outputs=1, **kwargs):
 
         super().__init__(**kwargs)
@@ -28,7 +29,7 @@ class MlpModel(mx.gluon.HybridBlock):
 
 
 class RnnModel(mx.gluon.HybridBlock):
-
+    """Multi-layer Elman RNN with fully-connected decoder."""
     def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, num_inputs=1,
                  activation_rnn=None, activation_decoder=None, **kwargs):
 
@@ -142,6 +143,7 @@ class StochasticLinearIOSystem(mx.gluon.HybridBlock):
 
 
 class DI(StochasticLinearIOSystem):
+    """Double integrator dynamical system."""
     def __init__(self, num_inputs, num_outputs, num_states, context, var_x=0,
                  var_y=0, dt=0.1, dtype='float32', **kwargs):
 
@@ -169,8 +171,12 @@ class DI(StochasticLinearIOSystem):
 
 
 class MLP:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, dtype='float32'):
+    """Dynamical system controlled by a multi-layer perceptron."""
+    def __init__(self, process: control_systems.StochasticLinearIOSystem,
+                 q: Optional[float] = 0.5, r: Optional[float] = 0.5,
+                 path_model: Optional[str] = None,
+                 model_kwargs: Optional[dict] = None,
+                 dtype: Optional[str] = 'float32'):
 
         self.process = process
         self.dtype = dtype
@@ -213,8 +219,12 @@ class MLP:
 
 
 class RNN:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, gpu=0, dtype='float32'):
+    """Dynamical system controlled by an RNN."""
+    def __init__(self, process: control_systems.StochasticLinearIOSystem,
+                 q: Optional[float] = 0.5, r: Optional[float] = 0.5,
+                 path_model: Optional[str] = None,
+                 model_kwargs: Optional[dict] = None, gpu: Optional[int] = 0,
+                 dtype: Optional[str] = 'float32'):
 
         self.process = process
         self.dtype = dtype
@@ -263,13 +273,13 @@ class RNN:
 
 
 class ControlledNeuralSystem(mx.gluon.HybridBlock):
-
-    def __init__(self, neuralsystem: RnnModel, controller: RnnModel, context,
-                 batch_size, **kwargs):
+    """Perturbed neural system stabilized by an RNN controller."""
+    def __init__(self, neuralsystem: RnnModel, controller: RnnModel,
+                 device: mx.context, batch_size: int, **kwargs):
         super().__init__(**kwargs)
         self.neuralsystem = neuralsystem
         self.controller = controller
-        self.context = context
+        self.context = device
         self.batch_size = batch_size
 
     def hybrid_forward(self, F, x, **kwargs):
@@ -328,10 +338,11 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
 
 
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
+    """A neural system coupled with a controller and environment."""
     def __init__(self, environment: DI, neuralsystem: RnnModel,
-                 controller: RnnModel, context, batch_size, num_steps: int,
-                 **kwargs):
-        super().__init__(neuralsystem, controller, context, batch_size,
+                 controller: RnnModel, device: mx.context, batch_size: int,
+                 num_steps: int, **kwargs):
+        super().__init__(neuralsystem, controller, device, batch_size,
                          **kwargs)
         self.environment = environment
         self.num_steps = num_steps
@@ -364,9 +375,10 @@ class ClosedControlledNeuralSystem(ControlledNeuralSystem):
 
 
 class PidRnn:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs: dict = None, gpu=0, k_p=1, k_i=1, k_d=1,
-                 dtype='float32'):
+    """A perturbed RNN stabilized by a PID controller."""
+    def __init__(self, process: control_systems.StochasticLinearIOSystem,
+                 q=0.5, r=0.5, path_model=None, model_kwargs: dict = None,
+                 gpu=0, k_p=1, k_i=1, k_d=1, dtype='float32'):
 
         self.process = process
         self.dtype = dtype
@@ -431,8 +443,10 @@ class PidRnn:
 
 
 class LqeMlp:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs=None):
+    """A dynamical system with Kalman filter and multi-layer perceptron
+    controller."""
+    def __init__(self, process: control_systems.StochasticLinearIOSystem,
+                 q=0.5, r=0.5, path_model=None, model_kwargs=None):
         self.process = process
         self.estimator = control_systems.LQE(self.process)
         self.control = MLP(self.process, q, r, path_model, model_kwargs)
@@ -454,8 +468,10 @@ class LqeMlp:
 
 
 class LqeRnn:
-    def __init__(self, process, q=0.5, r=0.5, path_model=None,
-                 model_kwargs=None, dtype='float32'):
+    """A dynamical system with Kalman filter and RNN controller."""
+    def __init__(self, process: control_systems.StochasticLinearIOSystem,
+                 q=0.5, r=0.5, path_model=None, model_kwargs=None,
+                 dtype='float32'):
         self.process = process
         self.dtype = dtype
         self.estimator = control_systems.LQE(self.process)
@@ -479,6 +495,7 @@ class LqeRnn:
 
 
 class DiMlp(MLP):
+    """Double integrator controlled by a multi-layer perceptron."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  path_model=None, model_kwargs=None):
         num_inputs = 1
@@ -490,6 +507,8 @@ class DiMlp(MLP):
 
 
 class DiPidRnn(PidRnn):
+    """Double integrator with a perturbed RNN stabilized by a PID controller.
+    """
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  path_model=None, model_kwargs: dict = None, gpu=0, k_p=1,
                  k_i=1, k_d=1):
@@ -503,6 +522,7 @@ class DiPidRnn(PidRnn):
 
 
 class DiRnn(RNN):
+    """Double integrator controlled by an RNN."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  path_model=None, model_kwargs: dict = None, gpu=0):
         num_inputs = 1
@@ -514,6 +534,8 @@ class DiRnn(RNN):
 
 
 class DiLqeMlp(LqeMlp):
+    """Double integrator with Kalman filter and multi-layer perceptron
+    controller."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  path_model=None, model_kwargs=None):
         num_inputs = 1
@@ -525,6 +547,7 @@ class DiLqeMlp(LqeMlp):
 
 
 class DiLqeRnn(LqeRnn):
+    """Double integrator with Kalman filter and RNN controller."""
     def __init__(self, var_x=0, var_y=0, dt=0.1, rng=None, q=0.5, r=0.5,
                  path_model=None, model_kwargs: dict = None):
         num_inputs = 1
@@ -536,7 +559,9 @@ class DiLqeRnn(LqeRnn):
 
 
 class Masker:
-    def __init__(self, model: 'ControlledNeuralSystem', p,
+    """Helper class to set certain rows in the readout and stimulation matrix
+    of a controller to zero."""
+    def __init__(self, model: ControlledNeuralSystem, p,
                  rng: np.random.Generator):
         self.model = model
         self.p = p
@@ -554,13 +579,14 @@ class Masker:
 
 
 class Gramians(mx.gluon.HybridBlock):
-    def __init__(self, model: 'ControlledNeuralSystem',
-                 environment: StochasticLinearIOSystem, context, dt, T,
-                 **kwargs):
+    """Estimator for empirical controllability and observability Gramians."""
+    def __init__(self, model: ControlledNeuralSystem,
+                 environment: StochasticLinearIOSystem, device: mx.context,
+                 dt: float, T: float, **kwargs):
         super().__init__(**kwargs)
         self.model = model
         self.environment = environment
-        self.context = context
+        self.device = device
         self.dt = dt
         self.T = T
         self.num_inputs = self.model.controller.num_hidden
@@ -569,13 +595,13 @@ class Gramians(mx.gluon.HybridBlock):
         self._return_observations = None
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        environment_states = self.environment.begin_state(1, self.context, F)
+        environment_states = self.environment.begin_state(1, self.device, F)
         neuralsystem_states = [args[0]]
         neuralsystem_output = \
-            F.zeros((1, 1, self.environment.num_inputs), self.context)
+            F.zeros((1, 1, self.environment.num_inputs), self.device)
         outputs = []
         for t in np.arange(0, self.T, self.dt):
-            ut = F.array(np.expand_dims(x(t), (0, 1)), self.context)
+            ut = F.array(np.expand_dims(x(t), (0, 1)), self.device)
             environment_output, environment_states = self.environment(
                 environment_states, neuralsystem_output)
             neuralsystem_output, neuralsystem_states = self.model.neuralsystem(
@@ -589,7 +615,7 @@ class Gramians(mx.gluon.HybridBlock):
 
     # noinspection PyUnusedLocal
     def _ode(self, f, g, t, x0, u, p):
-        x0 = mx.nd.array(np.expand_dims(x0, (0, 1)), self.context)
+        x0 = mx.nd.array(np.expand_dims(x0, (0, 1)), self.device)
         return self.__call__(u, x0).asnumpy()
 
     def compute_gramian(self, kind):
@@ -608,6 +634,7 @@ class Gramians(mx.gluon.HybridBlock):
 
 
 class L2L1(mx.gluon.loss.L2Loss):
+    """L2 loss on activations with L1 loss on weights."""
     def __init__(self, lambda_: float, context, **kwargs):
         super().__init__(**kwargs)
         self.l1 = mx.gluon.loss.L1Loss(lambda_)
@@ -625,6 +652,7 @@ class L2L1(mx.gluon.loss.L2Loss):
 
 
 class LQRLoss(mx.gluon.loss.Loss):
+    """Linear Quadratic Regulator loss."""
     def __init__(self, weight=1, batch_axis=0, **kwargs):
         self.Q = kwargs.pop('Q')
         self.R = kwargs.pop('R')
@@ -646,6 +674,8 @@ class LQRLoss(mx.gluon.loss.Loss):
 
 
 def get_device(config: CfgNode) -> mx.context:
+    """Return hardware backend to run on."""
+
     # Disable an irrelevant cudnn library warning.
     os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
 

@@ -1,13 +1,15 @@
 import logging
 import os
 import sys
-from typing import Callable
+from typing import Callable, Optional, Tuple, Union
 
+import gym
 import mlflow
 import numpy as np
 import torch
 from gym.wrappers import TimeLimit
 from matplotlib import pyplot as plt
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 from stable_baselines3.common.logger import Figure
 
@@ -16,10 +18,13 @@ from examples.linear_rnn_lqr import NeuralPerturbationPipeline
 from src.control_systems_torch import DiGym, Masker, RnnModel, Gramians
 from src.plotting import plot_phase_diagram
 from src.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
-from src.utils import get_artifact_path
+from src.utils import get_artifact_path, Monitor
 
 
-class FigureRecorderTest(BaseCallback):
+class EvaluationCallback(BaseCallback):
+    """
+    Custom torch callback to evaluate an RL agent and log a phase diagram.
+    """
     def _on_step(self) -> bool:
         n = self.n_calls
         env = self.locals['env'].envs[0]
@@ -43,7 +48,30 @@ class FigureRecorderTest(BaseCallback):
         return True
 
 
-def evaluate(model, env, n, filename=None, deterministic=True):
+def evaluate(model: Union[RecurrentPPO, BaseAlgorithm], env: DiGym, n: int,
+             filename: Optional[str] = None,
+             deterministic: Optional[bool] = True) -> Tuple[float, float]:
+    """Evaluate RL agent and optionally plot phase diagram.
+
+    Parameters
+    ----------
+    model
+        The policy to evaluate.
+    env
+        The environment to evaluate `model` in.
+    n
+        Number of evaluation runs.
+    filename
+        If specified, plot phase diagram and save under given name in the
+        mlflow artifact directory.
+    deterministic
+        If `True`, the actions are selected deterministically.
+
+    Returns
+    -------
+    results
+        A tuple with the average reward and episode length.
+    """
     reward_means, episode_lengths = run_n(n, env, model,
                                           deterministic=deterministic)
     if filename is not None:
@@ -55,7 +83,8 @@ def evaluate(model, env, n, filename=None, deterministic=True):
     return np.mean(reward_means).item(), np.mean(episode_lengths).item()
 
 
-def run_n(n, *args, **kwargs):
+def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
+    """Run an RL agent for `n` episodes and return reward and run lengths."""
     reward_means = []
     episode_lengths = []
     for i in range(n):
@@ -65,7 +94,35 @@ def run_n(n, *args, **kwargs):
     return reward_means, episode_lengths
 
 
-def run_single(env, model, x0=None, monitor=None, deterministic=True):
+def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
+               x0: Optional[np.ndarray] = None,
+               monitor: Optional[Monitor] = None,
+               deterministic: Optional[bool] = True
+               ) -> Tuple[np.ndarray, list]:
+    """Run an RL agent for one episode and return states and rewards.
+
+    Parameters
+    ----------
+    model
+        The policy to evaluate.
+    env
+        The environment to evaluate `model` in.
+    x0
+        Initial states. Zero if not specified.
+    monitor
+        A logging container.
+    deterministic
+        If `True`, the actions are selected deterministically.
+
+    Returns
+    -------
+    results
+        A tuple containing:
+
+        - The environment states with shape (num_timesteps, 1, num_states). The
+          second axis is a placeholder for the batch size.
+        - Episode rewards with shape (num_timesteps,).
+    """
     t = 0
     y = env.reset(state_init=x0)
     x = env.states.cpu().numpy()
@@ -97,29 +154,45 @@ def run_single(env, model, x0=None, monitor=None, deterministic=True):
     return np.expand_dims(states, 1), rewards
 
 
-def linear_schedule(initial_value: float,
-                    q: float = 0.01) -> Callable[[float], float]:
+def linear_schedule(initial_value: float, q: float = 0.01
+                    ) -> Callable[[float], float]:
     """
     Linear learning rate schedule.
 
-    :param initial_value: Initial learning rate.
-    :param q: Fraction of initial learning rate at end of progress.
-    :return: schedule that computes
-      current learning rate depending on remaining progress
+    Parameters
+    ----------
+    initial_value
+        Initial learning rate.
+    q
+        Fraction of initial learning rate at end of progress.
+
+    Returns
+    -------
+    out
+        Schedule that computes current learning rate depending on remaining
+        progress.
     """
     def func(progress_remaining: float) -> float:
         """
         Progress will decrease from 1 (beginning) to 0.
 
-        :param progress_remaining:
-        :return: current learning rate
+        Parameters
+        ----------
+        progress_remaining
+            Fraction of remaining steps till end of training.
+        Returns
+        -------
+        out
+            current learning rate
         """
         return initial_value * (progress_remaining * (1 - q) + q)
 
     return func
 
 
-def add_noise(model, where, sigma, dt, rng: np.random.Generator):
+def add_noise(model: RecurrentPPO, where: str, sigma: float, dt: float,
+              rng: np.random.Generator):
+    """Add gaussian noise to weights of neural system."""
     if where in (None, 'None', 'none', ''):
         return
     elif where == 'sensor':
@@ -136,6 +209,7 @@ def add_noise(model, where, sigma, dt, rng: np.random.Generator):
 
 
 class MaskingCallback(BaseCallback):
+    """Custom torch callback to set some rows of weight matrix to zero."""
     def __init__(self, masker: Masker):
         super().__init__()
         self.masker = masker
@@ -156,7 +230,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
     def evaluate(model, env, n, filename=None, deterministic=True):
         return evaluate(model, env, n, filename, deterministic)
 
-    def get_environment(self, **kwargs):
+    def get_environment(self, **kwargs) -> gym.Env:
+        """Create a double integrator gym environment."""
         neuralsystem_num_outputs = 1
         environment_num_outputs = 1
         environment_num_states = 2
@@ -175,7 +250,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         return environment
 
     def get_model(self, device, freeze_neuralsystem, freeze_controller,
-                  load_weights_from: str = None, environment=None):
+                  load_weights_from=None, environment: gym.Env = None
+                  ) -> RecurrentPPO:
         neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
         controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
@@ -275,7 +351,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
         masker = Masker(controlled_neuralsystem, dropout_probability, rng)
         callbacks = [EveryNTimesteps(int(num_epochs * evaluation_rate),
-                                     FigureRecorderTest()),
+                                     EvaluationCallback()),
                      MaskingCallback(masker)]
 
         logging.info("Training...")

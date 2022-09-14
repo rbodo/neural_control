@@ -2,20 +2,24 @@ import os
 import time
 from collections import OrderedDict
 from itertools import product
-from typing import Tuple
+from typing import Tuple, List, Union, Optional, Iterable
 from urllib.parse import unquote, urlparse
 
 import mlflow
 import mxnet as mx
 import numpy as np
 import pandas as pd
+from yacs.config import CfgNode
 
 RNG = np.random.default_rng(42)
 
 
 class TimeSeriesVariable:
-    def __init__(self, name, label=None, ndim=None, column_labels=None,
-                 dtype=None):
+    """Custom container for time series data."""
+    
+    def __init__(self, name: str, label: str = None, ndim: int = None,
+                 column_labels: List[str] = None,
+                 dtype: Union[str, np.dtype] = None):
         self.name = name
         self.label = label or name  # Human-readable version of `name`.
         self.ndim = ndim
@@ -28,14 +32,14 @@ class TimeSeriesVariable:
         self.times = []
         self.parameters = {}
 
-    def append_measurement(self, t, d, parameters):
+    def append_measurement(self, t: float, d: float, parameters: dict):
         self.times.append(t)
         self.data.append(d)
         for key, value in parameters.items():
             self.parameters.setdefault(key, [])
             self.parameters[key].append(value)
 
-    def get_dataframe(self):
+    def get_dataframe(self) -> pd.DataFrame:
         data = pd.DataFrame(self.data, columns=self.column_labels,
                             dtype=self.dtype)
         data['times'] = self.times
@@ -45,6 +49,9 @@ class TimeSeriesVariable:
 
 
 class Monitor:
+    """Custom container to keep track of experiment parameters and
+    measurements."""
+
     def __init__(self):
         self.variables = {}
         self.parameters = {}
@@ -69,13 +76,14 @@ class Monitor:
             return inner
 
     @Decorators.mark_modified
-    def add_variable(self, name, label=None, ndim=None, column_labels=None,
-                     dtype=None):
+    def add_variable(self, name: str, label: str = None, ndim: int = None,
+                     column_labels: List[str] = None,
+                     dtype: Union[str, np.dtype] = None):
         self.variables[name] = TimeSeriesVariable(name, label, ndim,
                                                   column_labels, dtype)
 
     @Decorators.mark_modified
-    def update_variables(self, t, **kwargs):
+    def update_variables(self, t: float, **kwargs):
         for key, value in kwargs.items():
             self.variables[key].append_measurement(t, value, self.parameters)
 
@@ -93,17 +101,17 @@ class Monitor:
         self._is_variable_updated = False
 
     @staticmethod
-    def optimize_dtypes(df):
+    def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         for d in ['float', 'unsigned']:
             df = df.apply(pd.to_numeric, errors='ignore', downcast=d)
         return df.infer_objects()
 
     @Decorators.check_update_dataframe
-    def get_dataframe(self):
+    def get_dataframe(self) -> pd.DataFrame:
         return self._dataframe
 
     @Decorators.check_update_dataframe
-    def get_dataframe_melted(self):
+    def get_dataframe_melted(self) -> pd.DataFrame:
         df = self._dataframe.melt(
             id_vars=['times'] + list(self.parameters.keys()),
             value_name='value', var_name='dimension')
@@ -113,11 +121,11 @@ class Monitor:
         return df
 
     @Decorators.check_update_dataframe
-    def get_last_experiment_id(self):
+    def get_last_experiment_id(self) -> int:
         return self._dataframe['experiment'].max()
 
     @Decorators.check_update_dataframe
-    def get_last_trajectory(self):
+    def get_last_trajectory(self) -> OrderedDict:
         df = self._dataframe
         i = self.get_last_experiment_id()
         d = OrderedDict({'x': df.loc[df['experiment'] == i, 'x'].to_numpy(),
@@ -125,26 +133,36 @@ class Monitor:
         return d
 
     @Decorators.check_update_dataframe
-    def get_last_experiment(self):
+    def get_last_experiment(self) -> pd.DataFrame:
         i = self.get_last_experiment_id()
         df = self.get_dataframe_melted()
         return df[df['experiment'] == i]
 
 
-def get_additive_white_gaussian_noise(cov, size=None, rng=None,
-                                      method='cholesky'):
+def get_additive_white_gaussian_noise(
+        cov: np.ndarray, size: Optional[int] = None,
+        rng: Optional[np.random.Generator] = None,
+        method: Optional[str] = 'cholesky') -> np.ndarray:
     return get_gaussian_noise(np.zeros(len(cov), cov.dtype), cov, size, rng,
                               method)
 
 
-def get_gaussian_noise(mean, cov, size=None, rng=None, method='cholesky'):
+def get_gaussian_noise(mean: np.ndarray, cov: np.ndarray,
+                       size: Optional[int] = None,
+                       rng: Optional[np.random.Generator] = None,
+                       method: Optional[str] = 'cholesky') -> np.ndarray:
     if rng is None:
         rng = np.random.default_rng()
 
     return rng.multivariate_normal(mean, cov, size, method=method)
 
 
-def get_initial_states(mean, cov, num_states, n=1, rng=None, dtype='float32'):
+def get_initial_states(mean: np.ndarray, cov: np.ndarray, num_states: int,
+                       n: Optional[int] = 1,
+                       rng: Optional[np.random.Generator] = None,
+                       dtype: Optional[Union[float, np.dtype]] = 'float32'
+                       ) -> np.ndarray:
+    """Return noisy initial states of an environment."""
     if np.isscalar(mean):
         mean *= np.ones(num_states, dtype)
     else:
@@ -156,27 +174,30 @@ def get_initial_states(mean, cov, num_states, n=1, rng=None, dtype='float32'):
     return get_gaussian_noise(mean, cov, n, rng)
 
 
-def get_lqr_cost(x, u, Q, R, dt=1, sign=1, normalize=False):
+def get_lqr_cost(x: np.ndarray, u: np.ndarray, Q: np.ndarray, R: np.ndarray,
+                 dt: Optional[float] = 1, normalize: Optional[bool] = False
+                 ) -> float:
     """Compute cost of an LQR system."""
 
-    c = np.float32(sign) * dt * (np.dot(x, np.dot(Q, x)) +
-                                 np.dot(u, np.dot(R, u)))
+    c = dt * (np.dot(x, np.dot(Q, x)) + np.dot(u, np.dot(R, u)))
     if normalize:
         # Assumes Q, R diagonal.
         c /= np.sqrt(np.trace(np.square(Q)) + np.trace(np.square(R)))
-    return c
+    return c.item()
 
 
-def get_lqr_cost_vectorized(x, u, Q, R, dt=1, sign=1):
+def get_lqr_cost_vectorized(x: np.ndarray, u: np.ndarray, Q: np.ndarray,
+                            R: np.ndarray, dt: Optional[float] = 1
+                            ) -> np.ndarray:
     """Vectorized version for computing cost of an LQR system."""
 
     # Apply sum-product instead of matmul because we are dealing with a stack
     # of x and u vectors (one for each time step).
-    return sign * dt * (np.sum(x * (Q @ x), 0) + np.sum(u * (R @ u), 0))
+    return dt * (np.sum(x * (Q @ x), 0) + np.sum(u * (R @ u), 0))
 
 
-def split_train_test(data: pd.DataFrame, f: float = 0.2) \
-        -> Tuple[pd.DataFrame, pd.DataFrame]:
+def split_train_test(data: pd.DataFrame, f: Optional[float] = 0.2
+                     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     num_total = data['experiment'].max() + 1
     num_test = int(num_total * f)
     test_idxs = np.linspace(0, num_total, num_test, endpoint=False, dtype=int)
@@ -185,7 +206,8 @@ def split_train_test(data: pd.DataFrame, f: float = 0.2) \
     return data[mask_train], data[mask_test]
 
 
-def select_noise_subset(data, process_noises, observation_noises):
+def select_noise_subset(data: pd.DataFrame, process_noises: Iterable[float],
+                        observation_noises: Iterable[float]) -> pd.DataFrame:
     print("Using (combinations of) the following noise levels:")
     print(f"Process noise: {process_noises}")
     print(f"Observation noise: {observation_noises}")
@@ -198,13 +220,14 @@ def select_noise_subset(data, process_noises, observation_noises):
     return data[mask]
 
 
-def apply_config(config):
+def apply_config(config: CfgNode):
+    """Make config immutable, create paths, and save config."""
     config.freeze()
     create_paths(config)
     save_config(config)
 
 
-def create_paths(config):
+def create_paths(config: CfgNode):
     for k, p in config.paths.items():
         if 'FILE' in k:
             if p is not None:
@@ -213,7 +236,7 @@ def create_paths(config):
             os.makedirs(p, exist_ok=True)
 
 
-def save_config(config):
+def save_config(config: CfgNode):
     if config.paths.FILEPATH_OUTPUT_DATA:
         path = os.path.join(os.path.dirname(
             config.paths.FILEPATH_OUTPUT_DATA), '.config.txt')
@@ -221,17 +244,50 @@ def save_config(config):
             f.write(config.dump())
 
 
-def apply_timestamp(path, timestamp=None):
+def apply_timestamp(path: str, timestamp: Optional[str] = None) -> str:
     if timestamp is None:
         timestamp = time.strftime('%Y%m%d_%H%M%S')
     return os.path.join(path, timestamp)
 
 
-def get_artifact_path(relative_subpath=None):
+def get_artifact_path(relative_subpath: Optional[str] = None) -> str:
+    """Get the local filesystem path where mlflow stores logged artifacts.
+
+    If `relative_subpath` is specified, a subdirectory with this name will be
+    created in the base directory.
+    """
     return unquote(urlparse(mlflow.get_artifact_uri(relative_subpath)).path)
 
 
-def get_trajectories(data, num_steps, variable: str):
+def get_trajectories(data: pd.DataFrame, num_steps: int,
+                     variable: Optional[str]) -> np.ndarray:
+    """Return the trajectories of a system in state space.
+
+    Parameters
+    ----------
+    data
+        Dataframe containing various measurements of the system.
+    num_steps
+        How many time steps each trajectory should have.
+    variable
+        What kind of measurement to extract from `data`. Possible values:
+
+        - 'estimates': Kalman-filtered state estimates.
+        - 'observations': Noisy partial observations.
+        - 'states': Full noiseless system states.
+
+    Returns
+    -------
+    trajectories
+        Numpy array of shape (`num_steps`, num_states).
+
+    Raises
+    ------
+    NotImplementedError
+        If `variable` not one of ['estimates', 'observations', 'states'].
+    KeyError
+        If `data` does not contain requested measurements.
+    """
     if variable == 'estimates':
         print("Using Kalman-filtered state estimates.")
         x0 = data[r'$\hat{x}$']
@@ -255,13 +311,16 @@ def get_trajectories(data, num_steps, variable: str):
     return x.astype(np.float32)
 
 
-def get_control(data, num_steps):
+def get_control(data: pd.DataFrame, num_steps: int) -> np.ndarray:
     y = data['u']
     y = np.reshape(y.to_numpy(), (-1, 1, num_steps))
     return y.astype(np.float32)
 
 
-def get_data_loaders(data, config, variable):
+def get_data_loaders(data: pd.DataFrame, config: CfgNode, variable: str
+                     ) -> Tuple[mx.gluon.data.DataLoader,
+                                mx.gluon.data.DataLoader]:
+    """Create mxnet train and test data loaders from a pandas data frame."""
     print("\nPreparing data loaders:")
     num_cpus = max(os.cpu_count() // 2, 1)
     num_steps = config.simulation.NUM_STEPS
@@ -291,7 +350,18 @@ def get_data_loaders(data, config, variable):
     return test_data_loader, train_data_loader
 
 
-def get_grid(n, x_max=1):
+def get_grid(n: int, x_max: Optional[float] = 1) -> np.ndarray:
+    """Create a rectangular 2d grid.
+
+    Parameters
+    ----------
+    n
+        Number of grid nodes along each dimension.
+    x_max
+        Half the width of the grid (centered around zero).
+        The height is currently hard-coded to 0.4.
+    """
+
     x1_min, x1_max = -x_max, x_max
     x0_min, x0_max = -0.2, 0.2
     grid = np.mgrid[x0_min:x0_max:complex(0, n), x1_min:x1_max:complex(0, n)]
@@ -301,5 +371,7 @@ def get_grid(n, x_max=1):
     return grid
 
 
-def jitter(x, Sigma, rng):
+def jitter(x: np.ndarray, Sigma: np.ndarray, rng: np.random.Generator
+           ) -> np.ndarray:
+    """Add gaussian noise to an array."""
     return x + get_additive_white_gaussian_noise(Sigma, len(x), rng)

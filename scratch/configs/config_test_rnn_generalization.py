@@ -1,7 +1,7 @@
 import os.path
 
 from scratch import configs
-from scratch.double_integrator import get_model_name
+from scratch.train_rnn import get_model_name
 from src.utils import apply_timestamp
 
 
@@ -11,12 +11,12 @@ def get_config(timestamp_workdir=None):
     config3 = \
         configs.config_collect_training_data.get_config(timestamp_workdir)
 
-    PROCESS_NOISES = config.process.PROCESS_NOISES
-    OBSERVATION_NOISES = config.process.OBSERVATION_NOISES
+    process_noises = config.process.PROCESS_NOISES
+    observation_noises = config.process.OBSERVATION_NOISES
 
     path, model_name = os.path.split(config2.paths.FILEPATH_MODEL)
     model_name = \
-        get_model_name(model_name, PROCESS_NOISES[2], OBSERVATION_NOISES[2])
+        get_model_name(model_name, process_noises[2], observation_noises[2])
 
     base_path = '/home/bodrue/Data/neural_control/double_integrator/rnn/' \
                 'generalization/' + os.path.splitext(model_name)[0]
@@ -29,7 +29,7 @@ def get_config(timestamp_workdir=None):
 
     config.model.USE_SINGLE_MODEL_IN_SWEEP = True
 
-    config.process.PROCESS_NOISES = PROCESS_NOISES
-    config.process.OBSERVATION_NOISES = OBSERVATION_NOISES
+    config.process.PROCESS_NOISES = process_noises
+    config.process.OBSERVATION_NOISES = observation_noises
 
     return config

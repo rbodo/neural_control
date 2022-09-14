@@ -1,23 +1,30 @@
 import logging
 import os
 import sys
+from typing import Union, Optional, Tuple
 
 import gym
 import mlflow
 import numpy as np
 from matplotlib import pyplot as plt
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Figure
 
 from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline
+from src.control_systems import DiGym
 from src.plotting import plot_phase_diagram
-from src.utils import get_additive_white_gaussian_noise
+from src.ppo_recurrent import RecurrentPPO
+from src.utils import get_additive_white_gaussian_noise, Monitor
 
 os.environ['LD_LIBRARY_PATH'] += ':/usr/lib/nvidia:~/.mujoco/mujoco210/bin'
 
 
-class FigureRecorderTest(BaseCallback):
+class EvaluationCallback(BaseCallback):
+    """
+    Custom torch callback to evaluate an RL agent and log a phase diagram.
+    """
     def _on_step(self) -> bool:
         n = self.n_calls
         env = self.locals['env'].envs[0]
@@ -43,7 +50,30 @@ class FigureRecorderTest(BaseCallback):
         return True
 
 
-def evaluate(model, env, n, filename=None, deterministic=True):
+def evaluate(model: Union[RecurrentPPO, BaseAlgorithm], env: DiGym, n: int,
+             filename: Optional[str] = None,
+             deterministic: Optional[bool] = True) -> Tuple[float, float]:
+    """Evaluate RL agent and optionally plot phase diagram.
+
+    Parameters
+    ----------
+    model
+        The policy to evaluate.
+    env
+        The environment to evaluate `model` in.
+    n
+        Number of evaluation runs.
+    filename
+        If specified, plot phase diagram and save under given name in the
+        mlflow artifact directory.
+    deterministic
+        If `True`, the actions are selected deterministically.
+
+    Returns
+    -------
+    results
+        A tuple with the average reward and episode length.
+    """
     reward_means, episode_lengths = run_n(n, env, model,
                                           deterministic=deterministic)
     if filename is not None:
@@ -59,7 +89,8 @@ def evaluate(model, env, n, filename=None, deterministic=True):
     return np.mean(reward_means).item(), np.mean(episode_lengths).item()
 
 
-def run_n(n, *args, **kwargs):
+def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
+    """Run an RL agent for `n` episodes and return reward and run lengths."""
     reward_means = []
     episode_lengths = []
     for i in range(n):
@@ -69,7 +100,32 @@ def run_n(n, *args, **kwargs):
     return reward_means, episode_lengths
 
 
-def run_single(env, model, monitor=None, deterministic=True):
+def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
+               monitor: Optional[Monitor] = None,
+               deterministic: Optional[bool] = True
+               ) -> Tuple[np.ndarray, list]:
+    """Run an RL agent for one episode and return states and rewards.
+
+    Parameters
+    ----------
+    model
+        The policy to evaluate.
+    env
+        The environment to evaluate `model` in.
+    monitor
+        A logging container.
+    deterministic
+        If `True`, the actions are selected deterministically.
+
+    Returns
+    -------
+    results
+        A tuple containing:
+
+        - The environment states with shape (num_timesteps, 1, num_states). The
+          second axis is a placeholder for the batch size.
+        - Episode rewards with shape (num_timesteps,).
+    """
     t = 0
     y = env.reset()
     x = env.states
@@ -103,7 +159,24 @@ def run_single(env, model, monitor=None, deterministic=True):
 
 
 class POMDP(gym.ObservationWrapper):
-    def __init__(self, env, sigma, rng, observation_indices, dt):
+    def __init__(self, env: gym.Env, sigma: float, rng: np.random.Generator,
+                 observation_indices: np.iterable, dt: float):
+        """Custom gym ObservationWrapper to remove part of the observations and
+        add noise to the others.
+
+        Parameters
+        ----------
+        env
+            Environment to wrap.
+        sigma
+            Standard deviation of gaussian noise distribution.
+        rng
+            Pseudo-random number generator.
+        observation_indices
+            Indices of states to observe.
+        dt
+            Time constant for stepping through the environment.
+        """
         super().__init__(env)
         self.rng = rng
         self.observation_indexes = observation_indices
@@ -132,7 +205,9 @@ class NonlinearRlPipeline(LinearRlPipeline):
     def evaluate(model, env, n, filename=None, deterministic=True):
         return evaluate(model, env, n, filename, deterministic)
 
-    def get_environment(self, **kwargs):
+    def get_environment(self, **kwargs) -> POMDP:
+        """Create a partially observable inverted pendulum gym environment."""
+
         observation_noise = self.config.process.OBSERVATION_NOISE
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS

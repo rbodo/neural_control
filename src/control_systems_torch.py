@@ -14,6 +14,7 @@ from src.utils import get_lqr_cost
 
 
 class MlpModel(nn.Module):
+    """Multi-layer perceptron."""
     def __init__(self, num_inputs, num_hidden, num_outputs, activation_hidden,
                  activation_output, dtype, device):
 
@@ -34,7 +35,7 @@ class MlpModel(nn.Module):
 
 
 class RnnModel(nn.Module):
-
+    """Multi-layer Elman RNN with fully-connected decoder."""
     def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
                  activation_rnn=None, activation_decoder=None, device=None,
                  dtype=None):
@@ -158,6 +159,7 @@ class StochasticLinearIOSystem(nn.Module):
 
 
 class DI(StochasticLinearIOSystem):
+    """Double integrator dynamical system."""
     def __init__(self, num_inputs, num_outputs, num_states, var_x: float = 0,
                  var_y: float = 0, dt: float = 0.1, dtype=torch.float32,
                  device='cuda'):
@@ -180,6 +182,7 @@ class DI(StochasticLinearIOSystem):
 
 
 class MLP:
+    """Dynamical system controlled by a multi-layer perceptron."""
     def __init__(self, process, num_hidden, activation_hidden,
                  activation_output, q=0.5, r=0.5, path_model=None):
 
@@ -225,6 +228,7 @@ class MLP:
 
 
 class ControlledRnn(nn.Module):
+    """Perturbed RNN stabilized by a controller RNN."""
     def __init__(self, rnn: nn.RNN, controller: RnnModel):
         super().__init__()
         self.neuralsystem = rnn
@@ -264,6 +268,7 @@ class ControlledRnn(nn.Module):
 
 
 class DiMlp(MLP):
+    """Double integrator controlled by a multi-layer perceptron."""
     def __init__(self, num_inputs, num_outputs, num_states, num_hidden,
                  activation_hidden, activation_output, var_x=0, var_y=0,
                  dt=0.1, q=0.5, r=0.5, path_model=None, dtype=torch.float32,
@@ -275,7 +280,7 @@ class DiMlp(MLP):
 
 
 class DiGym(gym.Env):
-    """Custom Environment that follows gym interface."""
+    """Double integrator that follows gym interface."""
 
     metadata = {'render.modes': ['console']}
 
@@ -323,7 +328,7 @@ class DiGym(gym.Env):
         self.t = None
 
     def get_cost(self, x, u):
-        return get_lqr_cost(x, u, self.Q, self.R, self.dt).item()
+        return get_lqr_cost(x, u, self.Q, self.R, self.dt)
 
     def step(self, action):
 
@@ -348,7 +353,7 @@ class DiGym(gym.Env):
 
     def is_done(self, x, u):
         cost = get_lqr_cost(np.squeeze(x), np.squeeze(u), self.Q_states,
-                            self.R, self.dt).item()
+                            self.R, self.dt)
         return cost < self.cost_threshold
 
     def begin_state(self):
@@ -376,7 +381,9 @@ class DiGym(gym.Env):
 
 
 class Masker:
-    def __init__(self, model: 'ControlledRnn', p, rng: np.random.Generator):
+    """Helper class to set certain rows in the readout and stimulation matrix
+    of a controller to zero."""
+    def __init__(self, model: ControlledRnn, p, rng: np.random.Generator):
         self.model = model
         self.p = p
         n = self.model.hidden_size
@@ -394,7 +401,8 @@ class Masker:
 
 
 class Gramians(nn.Module):
-    def __init__(self, model: 'ControlledRnn', environment,
+    """Estimator for empirical controllability and observability Gramians."""
+    def __init__(self, model: ControlledRnn, environment,
                  decoder: 'nn.Linear', T):
         super().__init__()
         self.model = model
@@ -457,6 +465,8 @@ class Gramians(nn.Module):
 
 
 def get_device(config: CfgNode) -> torch.device:
+    """Return hardware backend to run on."""
+
     os.environ['CUDA_VISIBLE_DEVICES'] = config.GPU
     # Always set GPU ID to 0 here because we allow only one visible device in
     # the environment variable.

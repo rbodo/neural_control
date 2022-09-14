@@ -1,11 +1,14 @@
 import logging
 import os
 import sys
+from typing import Union, Optional, Tuple
 
 import mlflow
 import mxnet as mx
 import numpy as np
+import torch
 from mxnet import autograd
+from torch.utils.data import DataLoader
 from tqdm import trange
 from tqdm.contrib import tenumerate
 
@@ -18,8 +21,8 @@ from src.control_systems_mxnet import (RnnModel, ControlledNeuralSystem, DI,
 
 
 class LqgPipeline(NeuralPerturbationPipeline):
-    def get_model(self, context, freeze_neuralsystem, freeze_controller,
-                  load_weights_from: str = None):
+    def get_model(self, device, freeze_neuralsystem, freeze_controller,
+                  load_weights_from=None) -> Tuple[ControlledNeuralSystem, DI]:
         environment_num_states = 2
         environment_num_outputs = 1
         neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
@@ -37,7 +40,7 @@ class LqgPipeline(NeuralPerturbationPipeline):
         dt = T / num_steps
 
         environment = DI(neuralsystem_num_outputs, environment_num_outputs,
-                         environment_num_states, context, process_noise,
+                         environment_num_states, device, process_noise,
                          observation_noise, dt, prefix='environment_')
 
         neuralsystem = RnnModel(
@@ -45,7 +48,7 @@ class LqgPipeline(NeuralPerturbationPipeline):
             neuralsystem_num_outputs, environment_num_outputs,
             activation_rnn, activation_decoder, prefix='neuralsystem_')
         if load_weights_from is None:
-            neuralsystem.initialize(mx.init.Xavier(), context)
+            neuralsystem.initialize(mx.init.Xavier(), device)
         if freeze_neuralsystem:
             neuralsystem.collect_params().setattr('grad_req', 'null')
 
@@ -54,22 +57,46 @@ class LqgPipeline(NeuralPerturbationPipeline):
                               activation_rnn, activation_decoder,
                               prefix='controller_')
         if load_weights_from is None:
-            controller.initialize(mx.init.Zero(), context)
+            controller.initialize(mx.init.Zero(), device)
         if freeze_controller:
             controller.collect_params().setattr('grad_req', 'null')
 
-        model = ControlledNeuralSystem(neuralsystem, controller, context,
+        model = ControlledNeuralSystem(neuralsystem, controller, device,
                                        batch_size)
         if load_weights_from is not None:
-            model.load_parameters(load_weights_from, ctx=context)
+            model.load_parameters(load_weights_from, ctx=device)
 
         model.hybridize(active=True, static_alloc=True, static_shape=True)
 
         return model, environment
 
     @staticmethod
-    def evaluate(model: ControlledNeuralSystem, data_loader, loss_function,
-                 filename=None):
+    def evaluate(model: ControlledNeuralSystem, data_loader: DataLoader,
+                 loss_function: Union[torch.nn.Module, mx.gluon.HybridBlock],
+                 filename: Optional[str] = None) -> float:
+        """
+        Evaluate model.
+
+        Parameters
+        ----------
+        model
+            Neural system and controller. Possibly includes the differentiable
+            environment in the computational graph.
+        data_loader
+            Data loaders for train and test set. Contain trajectories in state
+            space to provide initial values or learning signal.
+        loss_function
+            Loss function used to evaluate performance. E.g. L2 or LQR.
+        filename
+            If specified, create an example phase diagram and save under given
+            name.
+
+        Returns
+        -------
+        loss
+            The average performance when evaluating `loss_function` on the
+            samples in `data_loader`.
+        """
         validation_loss = 0
         environment_states = data = None
         for data, label in data_loader:

@@ -13,7 +13,7 @@ from optuna.integration.mlflow import MLflowCallback, RUN_ID_ATTRIBUTE_KEY
 from stable_baselines3.common.evaluation import evaluate_policy
 from tqdm import trange
 
-from examples.linear_rnn_rl import (FigureRecorderTest, run_single,
+from examples.linear_rnn_rl import (EvaluationCallback, run_single,
                                     linear_schedule)
 from src.control_systems_torch import DiGym
 from src.plotting import plot_phase_diagram
@@ -71,7 +71,7 @@ def main(study: optuna.Study, path, frozen_params=None,
     # model = PPO('MlpPolicy', env, verbose=1, device='cuda',
     #             tensorboard_log=log_dir)
     model.learn(int(5e5), callback=[
-        FigureRecorderTest(),
+        EvaluationCallback(),
         # FigureRecorderTrain()
     ])
 
