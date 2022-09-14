@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Figure
+from yacs.config import CfgNode
 
 from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline
@@ -200,6 +201,9 @@ class POMDP(gym.ObservationWrapper):
 
 
 class NonlinearRlPipeline(LinearRlPipeline):
+    def __init__(self, config: CfgNode):
+        super().__init__(config)
+        self.evaluation_callback = EvaluationCallback()
 
     @staticmethod
     def evaluate(model, env, n, filename=None, deterministic=True):

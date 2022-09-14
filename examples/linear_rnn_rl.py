@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 from stable_baselines3.common.logger import Figure
+from yacs.config import CfgNode
 
 from examples import configs
 from examples.linear_rnn_lqr import NeuralPerturbationPipeline
@@ -226,6 +227,9 @@ class MaskingCallback(BaseCallback):
 
 
 class LinearRlPipeline(NeuralPerturbationPipeline):
+    def __init__(self, config: CfgNode):
+        super().__init__(config)
+        self.evaluation_callback = EvaluationCallback()
 
     def get_device(self) -> torch.device:
         return get_device(self.config)
@@ -355,7 +359,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
         masker = Masker(controlled_neuralsystem, dropout_probability, rng)
         callbacks = [EveryNTimesteps(int(num_epochs * evaluation_rate),
-                                     EvaluationCallback()),
+                                     self.evaluation_callback),
                      MaskingCallback(masker)]
 
         logging.info("Training...")
