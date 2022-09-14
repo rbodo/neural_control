@@ -467,7 +467,8 @@ class Gramians(nn.Module):
 def get_device(config: CfgNode) -> torch.device:
     """Return hardware backend to run on."""
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = config.GPU
+    gpu = str(config.GPU)
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu
     # Always set GPU ID to 0 here because we allow only one visible device in
     # the environment variable.
-    return torch.device('cpu' if not config.GPU else 'cuda:0')
+    return torch.device('cpu' if not gpu else 'cuda:0')

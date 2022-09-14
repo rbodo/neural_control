@@ -15,7 +15,8 @@ from stable_baselines3.common.logger import Figure
 
 from examples import configs
 from examples.linear_rnn_lqr import NeuralPerturbationPipeline
-from src.control_systems_torch import DiGym, Masker, RnnModel, Gramians
+from src.control_systems_torch import (DiGym, Masker, RnnModel, Gramians,
+                                       get_device)
 from src.plotting import plot_phase_diagram
 from src.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
 from src.utils import get_artifact_path, Monitor
@@ -226,6 +227,9 @@ class MaskingCallback(BaseCallback):
 
 class LinearRlPipeline(NeuralPerturbationPipeline):
 
+    def get_device(self) -> torch.device:
+        return get_device(self.config)
+
     @staticmethod
     def evaluate(model, env, n, filename=None, deterministic=True):
         return evaluate(model, env, n, filename, deterministic)
@@ -235,8 +239,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         neuralsystem_num_outputs = 1
         environment_num_outputs = 1
         environment_num_states = 2
-        process_noise = self.config.process.PROCESS_NOISE
-        observation_noise = self.config.process.OBSERVATION_NOISE
+        process_noise = self.config.process.PROCESS_NOISES[0]
+        observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps

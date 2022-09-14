@@ -8,7 +8,6 @@ from yacs.config import CfgNode
 from py.emgr import emgr
 from src import control_systems
 from src.utils import get_lqr_cost
-from scratch.ff_pid.pid import PID
 
 
 class MlpModel(mx.gluon.HybridBlock):
@@ -275,7 +274,7 @@ class RNN:
 class ControlledNeuralSystem(mx.gluon.HybridBlock):
     """Perturbed neural system stabilized by an RNN controller."""
     def __init__(self, neuralsystem: RnnModel, controller: RnnModel,
-                 device: mx.context, batch_size: int, **kwargs):
+                 device: mx.context.Context, batch_size: int, **kwargs):
         super().__init__(**kwargs)
         self.neuralsystem = neuralsystem
         self.controller = controller
@@ -340,8 +339,8 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
     """A neural system coupled with a controller and environment."""
     def __init__(self, environment: DI, neuralsystem: RnnModel,
-                 controller: RnnModel, device: mx.context, batch_size: int,
-                 num_steps: int, **kwargs):
+                 controller: RnnModel, device: mx.context.Context,
+                 batch_size: int, num_steps: int, **kwargs):
         super().__init__(neuralsystem, controller, device, batch_size,
                          **kwargs)
         self.environment = environment
@@ -394,7 +393,7 @@ class PidRnn:
         self.path_model = path_model
         self.model = self.get_model()
         self.model_setpoint = self.get_model()
-        self.pid = PID(k_p=k_p, k_i=k_i, k_d=k_d)
+        self.pid = control_systems.PID(k_p=k_p, k_i=k_i, k_d=k_d)
 
     def get_model(self):
         model = RnnModel(**self.model_kwargs)
@@ -581,8 +580,8 @@ class Masker:
 class Gramians(mx.gluon.HybridBlock):
     """Estimator for empirical controllability and observability Gramians."""
     def __init__(self, model: ControlledNeuralSystem,
-                 environment: StochasticLinearIOSystem, device: mx.context,
-                 dt: float, T: float, **kwargs):
+                 environment: StochasticLinearIOSystem,
+                 device: mx.context.Context, dt: float, T: float, **kwargs):
         super().__init__(**kwargs)
         self.model = model
         self.environment = environment
@@ -673,10 +672,10 @@ class LQRLoss(mx.gluon.loss.Loss):
             return F.mean(loss, axis=self._batch_axis, exclude=True)
 
 
-def get_device(config: CfgNode) -> mx.context:
+def get_device(config: CfgNode) -> mx.context.Context:
     """Return hardware backend to run on."""
 
     # Disable an irrelevant cudnn library warning.
     os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
 
-    return mx.gpu(config.GPU) if mx.context.num_gpus() > 0 else mx.cpu()
+    return mx.gpu(int(config.GPU)) if mx.context.num_gpus() > 0 else mx.cpu()

@@ -297,7 +297,7 @@ def get_trajectories(data: pd.DataFrame, num_steps: int,
         x = np.stack([x0, x1], 1)
     elif variable == 'observations':
         print("Using noisy partial observations.")
-        x = data['y']
+        x = data['$y_x$']
         x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
     elif variable == 'states':
         print("Using states.")

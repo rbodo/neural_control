@@ -7,7 +7,7 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 8
+    config.GPU = 5
     config.EXPERIMENT_NAME = 'nonlinear_rnn_rl'
 
     base_path = os.path.join(os.path.expanduser(
@@ -17,7 +17,8 @@ def get_config():
     config.simulation.NUM_STEPS = 1000
     config.simulation.T = config.simulation.NUM_STEPS / 10
 
-    config.process.OBSERVATION_NOISE = 0.002
+    config.process.PROCESS_NOISES = [0]
+    config.process.OBSERVATION_NOISES = [0.002]
 
     config.training.NUM_EPOCHS = 1e6
     config.training.BATCH_SIZE = None

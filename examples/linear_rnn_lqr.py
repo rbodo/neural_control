@@ -67,7 +67,7 @@ class NeuralPerturbationPipeline(ABC):
         self.data_dict = data_dict or {}
 
     @abstractmethod
-    def get_model(self, device: Union[torch.device, mx.context],
+    def get_model(self, device: Union[torch.device, mx.context.Context],
                   freeze_neuralsystem: bool, freeze_controller: bool,
                   load_weights_from: Optional[str] = None
                   ) -> ControlledNeuralSystem:
@@ -91,7 +91,7 @@ class NeuralPerturbationPipeline(ABC):
     @abstractmethod
     def train(self, perturbation_type: str, perturbation_level: float,
               dropout_probability: float,
-              device: Union[torch.device, mx.context],
+              device: Union[torch.device, mx.context.Context],
               save_model: Optional[bool] = True, **kwargs) -> dict:
         """Train the model (consisting of a neural system and a controller).
 
@@ -125,6 +125,11 @@ class NeuralPerturbationPipeline(ABC):
         """Evaluate model."""
         raise NotImplementedError
 
+    @abstractmethod
+    def get_device(self) -> Union[mx.context.Context, torch.device]:
+        """Get hardware backend to run on."""
+        raise NotImplementedError
+
     def main(self):
         """Run the pipeline.
 
@@ -137,7 +142,7 @@ class NeuralPerturbationPipeline(ABC):
         """
 
         # Select hardware backend.
-        device = get_device(self.config)
+        device = self.get_device()
 
         # We use the mlflow package for tracking experiment results.
         mlflow.set_tracking_uri(os.path.join(
@@ -198,6 +203,9 @@ class NeuralPerturbationPipeline(ABC):
 
 
 class LqrPipeline(NeuralPerturbationPipeline):
+    def get_device(self) -> mx.context.Context:
+        return get_device(self.config)
+
     def get_model(self, device, freeze_neuralsystem, freeze_controller,
                   load_weights_from: str = None
                   ) -> ClosedControlledNeuralSystem:
@@ -211,8 +219,8 @@ class LqrPipeline(NeuralPerturbationPipeline):
         activation_rnn = self.config.model.ACTIVATION
         activation_decoder = None  # Defaults to 'linear'
         batch_size = self.config.training.BATCH_SIZE
-        process_noise = self.config.process.PROCESS_NOISE
-        observation_noise = self.config.process.OBSERVATION_NOISE
+        process_noise = self.config.process.PROCESS_NOISES[0]
+        observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
@@ -448,7 +456,7 @@ if __name__ == '__main__':
     # the RNN, and plot the LQR trajectories as comparison.
     _data_dict = get_data(_config, 'states')
 
-    pipeline = NeuralPerturbationPipeline(_config, _data_dict)
+    pipeline = LqrPipeline(_config, _data_dict)
     pipeline.main()
 
     sys.exit()

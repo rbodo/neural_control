@@ -208,7 +208,7 @@ class NonlinearRlPipeline(LinearRlPipeline):
     def get_environment(self, **kwargs) -> POMDP:
         """Create a partially observable inverted pendulum gym environment."""
 
-        observation_noise = self.config.process.OBSERVATION_NOISE
+        observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps

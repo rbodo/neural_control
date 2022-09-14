@@ -14,13 +14,15 @@ from tqdm.contrib import tenumerate
 
 from examples import configs
 from examples.linear_rnn_lqr import NeuralPerturbationPipeline, get_data
-from src.plotting import plot_phase_diagram
 from src.utils import get_artifact_path
 from src.control_systems_mxnet import (RnnModel, ControlledNeuralSystem, DI,
-                                       Masker, Gramians)
+                                       Masker, Gramians, get_device)
 
 
 class LqgPipeline(NeuralPerturbationPipeline):
+    def get_device(self) -> mx.context.Context:
+        return get_device(self.config)
+
     def get_model(self, device, freeze_neuralsystem, freeze_controller,
                   load_weights_from=None) -> Tuple[ControlledNeuralSystem, DI]:
         environment_num_states = 2
@@ -33,8 +35,8 @@ class LqgPipeline(NeuralPerturbationPipeline):
         activation_rnn = self.config.model.ACTIVATION
         activation_decoder = None  # Defaults to 'linear'
         batch_size = self.config.training.BATCH_SIZE
-        process_noise = self.config.process.PROCESS_NOISE
-        observation_noise = self.config.process.OBSERVATION_NOISE
+        process_noise = self.config.process.PROCESS_NOISES[0]
+        observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
@@ -98,26 +100,14 @@ class LqgPipeline(NeuralPerturbationPipeline):
             samples in `data_loader`.
         """
         validation_loss = 0
-        environment_states = data = None
         for data, label in data_loader:
             data = mx.nd.moveaxis(data, -1, 0)
             data = data.as_in_context(model.context)
             label = label.as_in_context(model.context)
-            neuralsystem_outputs, environment_states = model(data)
+            neuralsystem_outputs = model(data)
             neuralsystem_outputs = mx.nd.moveaxis(neuralsystem_outputs, 0, -1)
-            environment_states = mx.nd.moveaxis(environment_states, 0, -1)
             loss = loss_function(neuralsystem_outputs, label)
             validation_loss += loss.mean().asscalar()
-        if filename is not None:
-            fig = plot_phase_diagram({'x': environment_states[0, 0].asnumpy(),
-                                      'v': environment_states[0, 1].asnumpy()},
-                                     xt=[0, 0], show=False, xlim=[-1, 1],
-                                     ylim=[-1, 1], line_label='RNN')
-            fig = plot_phase_diagram({'x': data[:, 0, 0].asnumpy(),
-                                      'v': data[:, 0, 1].asnumpy()},
-                                     show=False, fig=fig, line_label='LQG')
-            fig.legend()
-            mlflow.log_figure(fig, os.path.join('figures', filename))
         return validation_loss / len(data_loader)
 
     def train(self, perturbation_type, perturbation_level, dropout_probability,
@@ -196,7 +186,7 @@ class LqgPipeline(NeuralPerturbationPipeline):
                 data = data.as_in_context(device)
                 label = label.as_in_context(device)
                 with autograd.record():
-                    u, x = model(data)
+                    u = model(data)
                     u = mx.nd.moveaxis(u, 0, -1)
                     loss = loss_function(u, label)
 

@@ -16,11 +16,12 @@ def get_config():
     config.paths.FILEPATH_INPUT_DATA = \
         os.path.abspath(os.path.join(base_path, '..', 'lqr_grid.pkl'))
 
-    config.process.PROCESS_NOISE = 0.01
-    config.process.OBSERVATION_NOISE = 0  # Fully observable, noiseless
+    config.process.PROCESS_NOISES = [0.01]
+    config.process.OBSERVATION_NOISES = [0]  # Fully observable, noiseless
 
     config.training.NUM_EPOCHS = 10
     config.training.BATCH_SIZE = 32
+    config.training.OPTIMIZER = 'adam'
 
     config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 50

@@ -17,8 +17,8 @@ def get_config():
     config.simulation.NUM_STEPS = 300
     config.simulation.T = config.simulation.NUM_STEPS / 10
 
-    config.process.PROCESS_NOISE = 0.01
-    config.process.OBSERVATION_NOISE = 0.1
+    config.process.PROCESS_NOISES = [0.01]
+    config.process.OBSERVATION_NOISES = [0.1]
 
     config.training.NUM_EPOCHS = 5e5
     config.training.BATCH_SIZE = None
