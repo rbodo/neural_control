@@ -19,7 +19,8 @@ from src.plotting import plot_phase_diagram
 from src.ppo_recurrent import RecurrentPPO
 from src.utils import get_additive_white_gaussian_noise, Monitor
 
-os.environ['LD_LIBRARY_PATH'] += ':/usr/lib/nvidia:~/.mujoco/mujoco210/bin'
+os.environ['LD_LIBRARY_PATH'] += \
+        ':/usr/lib/nvidia:' + os.path.expanduser('~/.mujoco/mujoco210/bin')
 
 
 class EvaluationCallback(BaseCallback):

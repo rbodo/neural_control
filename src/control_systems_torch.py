@@ -402,7 +402,8 @@ class Masker:
 
 class Gramians(nn.Module):
     """Estimator for empirical controllability and observability Gramians."""
-    def __init__(self, model: ControlledRnn, environment,
+    def __init__(self, model: ControlledRnn,
+                 environment: Union[gym.Env, StochasticLinearIOSystem],
                  decoder: 'nn.Linear', T):
         super().__init__()
         self.model = model
@@ -433,8 +434,8 @@ class Gramians(nn.Module):
             environment_output = self.environment.step(
                 neuralsystem_output.cpu().numpy())[0]
             neuralsystem_states, neuralsystem_states = self.model.neuralsystem(
-                torch.atleast_3d(torch.tensor(
-                    environment_output, dtype=self.dtype, device=self.device)),
+                torch.tensor(environment_output, dtype=self.dtype,
+                             device=self.device).unsqueeze(0).unsqueeze(0),
                 neuralsystem_states + self.model.readin(ut))
             neuralsystem_output = self.decoder(neuralsystem_states)
             if self._return_observations:
