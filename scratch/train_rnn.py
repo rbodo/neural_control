@@ -10,7 +10,7 @@ from mxnet import autograd
 from tqdm import trange, tqdm
 from tqdm.contrib import tenumerate
 
-from py.emgr import emgr
+from src.empirical_gramians import emgr
 from scratch import configs
 from src.control_systems_mxnet import RnnModel
 from src.plotting import plot_training_curve, float2str

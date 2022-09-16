@@ -5,7 +5,7 @@ import mxnet as mx
 import numpy as np
 from yacs.config import CfgNode
 
-from py.emgr import emgr
+from src.empirical_gramians import emgr
 from src import control_systems
 from src.utils import get_lqr_cost, atleast_3d
 

@@ -17,4 +17,3 @@ optuna
 plotly
 mxnet
 stable-baselines3[extra]
-git+https://github.com/rbodo/emgr.git
