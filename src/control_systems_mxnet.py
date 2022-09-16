@@ -7,7 +7,7 @@ from yacs.config import CfgNode
 
 from py.emgr import emgr
 from src import control_systems
-from src.utils import get_lqr_cost
+from src.utils import get_lqr_cost, atleast_3d
 
 
 class MlpModel(mx.gluon.HybridBlock):
@@ -338,9 +338,10 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
 
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
     """A neural system coupled with a controller and environment."""
-    def __init__(self, environment: DI, neuralsystem: RnnModel,
-                 controller: RnnModel, device: mx.context.Context,
-                 batch_size: int, num_steps: int, **kwargs):
+    def __init__(self, environment: StochasticLinearIOSystem,
+                 neuralsystem: RnnModel, controller: RnnModel,
+                 device: mx.context.Context, batch_size: int, num_steps: int,
+                 **kwargs):
         super().__init__(neuralsystem, controller, device, batch_size,
                          **kwargs)
         self.environment = environment
@@ -600,7 +601,7 @@ class Gramians(mx.gluon.HybridBlock):
             F.zeros((1, 1, self.environment.num_inputs), self.device)
         outputs = []
         for t in np.arange(0, self.T, self.dt):
-            ut = F.array(np.expand_dims(x(t), (0, 1)), self.device)
+            ut = F.array(atleast_3d(x(t)), self.device)
             environment_output, environment_states = self.environment(
                 environment_states, neuralsystem_output)
             neuralsystem_output, neuralsystem_states = self.model.neuralsystem(
@@ -650,7 +651,7 @@ class L2L1(mx.gluon.loss.L2Loss):
         return l2
 
 
-class LQRLoss(mx.gluon.loss.Loss):
+class LqrLoss(mx.gluon.loss.Loss):
     """Linear Quadratic Regulator loss."""
     def __init__(self, weight=1, batch_axis=0, **kwargs):
         self.Q = kwargs.pop('Q')

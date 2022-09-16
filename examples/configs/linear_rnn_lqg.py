@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+
 from examples import configs
 from yacs.config import CfgNode
 
@@ -14,21 +16,29 @@ def get_config():
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
     config.paths.BASE_PATH = base_path
     config.paths.FILEPATH_INPUT_DATA = \
-        os.path.abspath(os.path.join(base_path, '..', 'lqr_grid.pkl'))
+        os.path.abspath(os.path.join(base_path, '..', 'lqg_grid.pkl'))
 
+    # Environment
+    config.process.NUM_INPUTS = 1
+    config.process.NUM_STATES = 2
+    config.process.NUM_OUTPUTS = 1
     config.process.PROCESS_NOISES = [0.01]
-    config.process.OBSERVATION_NOISES = [0]  # Fully observable, noiseless
+    config.process.OBSERVATION_NOISES = np.logspace(-1, 0, 5,
+                                                    dtype='float32').tolist()[:1]
 
     config.training.NUM_EPOCHS = 10
     config.training.BATCH_SIZE = 32
     config.training.OPTIMIZER = 'adam'
 
+    # Neural system and controller
     config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 50
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
     config.model.NUM_HIDDEN_CONTROLLER = 40
     config.model.NUM_LAYERS_CONTROLLER = 1
+    config.model.CLOSE_ENVIRONMENT_LOOP = False  # Env is not part of graph
 
+    # Perturbation of neural system
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
     config.perturbation.PERTURBATION_TYPES = \

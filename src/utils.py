@@ -9,6 +9,7 @@ import mlflow
 import mxnet as mx
 import numpy as np
 import pandas as pd
+import torch
 from yacs.config import CfgNode
 
 RNG = np.random.default_rng(42)
@@ -297,7 +298,7 @@ def get_trajectories(data: pd.DataFrame, num_steps: int,
         x = np.stack([x0, x1], 1)
     elif variable == 'observations':
         print("Using noisy partial observations.")
-        x = data['$y_x$']
+        x = data['y']
         x = np.reshape(x.to_numpy(), (-1, 1, num_steps))
     elif variable == 'states':
         print("Using states.")
@@ -375,3 +376,34 @@ def jitter(x: np.ndarray, Sigma: np.ndarray, rng: np.random.Generator
            ) -> np.ndarray:
     """Add gaussian noise to an array."""
     return x + get_additive_white_gaussian_noise(Sigma, len(x), rng)
+
+
+def add_batch_dim(x):
+    return np.expand_dims(x, 1)
+
+
+def atleast_3d(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray,
+                                                            torch.Tensor]:
+    # Can't use np.atleast_3d here because want dimensions inserted in front.
+    if isinstance(x, np.ndarray):
+        for _ in range(3 - x.ndim):
+            x = np.expand_dims(x, 0)
+    elif isinstance(x, torch.Tensor):
+        for _ in range(3 - x.ndim):
+            x = x.unsqueeze(0)
+    else:
+        raise NotImplementedError
+    return x
+
+
+def get_data(config: CfgNode, variable: str):
+    """Return training and test data loader as dict.
+
+    Contains trajectories of a classic LQR controller in the double integrator
+    state space with initial values sampled from a jittered rectangular grid.
+    """
+
+    path_data = config.paths.FILEPATH_INPUT_DATA
+    data = pd.read_pickle(path_data)
+    data_test, data_train = get_data_loaders(data, config, variable)
+    return dict(data_train=data_train, data_test=data_test)

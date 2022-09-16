@@ -20,69 +20,80 @@ from src.control_systems_torch import (DiGym, Masker, RnnModel, Gramians,
                                        get_device)
 from src.plotting import plot_phase_diagram
 from src.ppo_recurrent import RecurrentPPO, MlpRnnPolicy
-from src.utils import get_artifact_path, Monitor
+from src.utils import (get_artifact_path, Monitor,
+                       get_additive_white_gaussian_noise, atleast_3d)
+
+
+class POMDP(gym.ObservationWrapper):
+    def __init__(self, env: gym.Env, sigma: float, rng: np.random.Generator,
+                 observation_indices: np.iterable, dt: float):
+        """Custom gym ObservationWrapper to remove part of the observations and
+        add noise to the others.
+
+        Parameters
+        ----------
+        env
+            Environment to wrap.
+        sigma
+            Standard deviation of gaussian noise distribution.
+        rng
+            Pseudo-random number generator.
+        observation_indices
+            Indices of states to observe.
+        dt
+            Time constant for stepping through the environment.
+        """
+        super().__init__(env)
+        self.rng = rng
+        self.observation_indexes = observation_indices
+        self.dt = dt
+        num_observations = len(self.observation_indexes)
+        self.sigma = np.eye(num_observations) * sigma
+        self._add_noise = sigma > 0
+        # We add a dummy batch and time dimension to the observations to make
+        # the environment compatible with the torch RNN pipeline.
+        shape = (1, 1, num_observations)
+        # noinspection PyUnresolvedReferences
+        self.observation_space = gym.spaces.Box(
+            low=atleast_3d(env.observation_space.low[observation_indices]),
+            high=atleast_3d(env.observation_space.high[observation_indices]),
+            shape=shape, dtype=env.observation_space.dtype)
+        self.states = None
+
+    def observation(self, observation):
+        self.states = atleast_3d(observation)
+        noise = 0
+        if self._add_noise:
+            noise = get_additive_white_gaussian_noise(self.sigma, rng=self.rng)
+        partial_observation = observation[self.observation_indexes]
+        return atleast_3d(partial_observation + noise)
 
 
 class EvaluationCallback(BaseCallback):
     """
     Custom torch callback to evaluate an RL agent and log a phase diagram.
     """
+    def __init__(self, num_test: int, evaluate_function: Callable):
+        super().__init__()
+        self.num_test = num_test
+        self.evaluate = evaluate_function
+
     def _on_step(self) -> bool:
         n = self.n_calls
         env = self.locals['env'].envs[0]
-        episode_reward, episode_length = evaluate(self.model, env, 100)
-        states, rewards = run_single(env, self.model)
-        figure = plot_phase_diagram({'x': states[:, 0, 0],
-                                     'v': states[:, 0, 1]}, xt=[0, 0],
-                                    show=False, xlim=[-1, 1], ylim=[-1, 1],
-                                    draw_endpoints=True)
+        episode_reward, episode_length, figure = self.evaluate(
+            env, self.num_test, f'figures/trajectory_{n}.png')
         self.logger.record('trajectory/eval', Figure(figure, close=True),
                            exclude=('stdout', 'log', 'json', 'csv'))
         self.logger.record('test/episode_reward', episode_reward)
-        self.logger.record('test/episode_length', episode_length)
-        mlflow.log_figure(figure, f'figures/trajectory_{n}.png')
         mlflow.log_metric(key='test_reward', value=episode_reward, step=n)
+        self.logger.record('test/episode_length', episode_length)
         mlflow.log_metric(key='test_episode_length', value=episode_length,
                           step=n)
         mlflow.log_metric(key='training_reward',
                           value=self.model.ep_info_buffer[-1]['r'], step=n)
         plt.close()
         return True
-
-
-def evaluate(model: Union[RecurrentPPO, BaseAlgorithm], env: DiGym, n: int,
-             filename: Optional[str] = None,
-             deterministic: Optional[bool] = True) -> Tuple[float, float]:
-    """Evaluate RL agent and optionally plot phase diagram.
-
-    Parameters
-    ----------
-    model
-        The policy to evaluate.
-    env
-        The environment to evaluate `model` in.
-    n
-        Number of evaluation runs.
-    filename
-        If specified, plot phase diagram and save under given name in the
-        mlflow artifact directory.
-    deterministic
-        If `True`, the actions are selected deterministically.
-
-    Returns
-    -------
-    results
-        A tuple with the average reward and episode length.
-    """
-    reward_means, episode_lengths = run_n(n, env, model,
-                                          deterministic=deterministic)
-    if filename is not None:
-        states, rewards = run_single(env, model)
-        fig = plot_phase_diagram({'x': states[:, 0, 0], 'v': states[:, 0, 1]},
-                                 xt=[0, 0], show=False, xlim=[-1, 1],
-                                 ylim=[-1, 1], draw_endpoints=True)
-        mlflow.log_figure(fig, os.path.join('figures', filename))
-    return np.mean(reward_means).item(), np.mean(episode_lengths).item()
 
 
 def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
@@ -96,8 +107,8 @@ def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
     return reward_means, episode_lengths
 
 
-def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
-               x0: Optional[np.ndarray] = None,
+def run_single(env: Union[DiGym, POMDP],
+               model: Union[RecurrentPPO, BaseAlgorithm],
                monitor: Optional[Monitor] = None,
                deterministic: Optional[bool] = True
                ) -> Tuple[np.ndarray, list]:
@@ -109,8 +120,6 @@ def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
         The policy to evaluate.
     env
         The environment to evaluate `model` in.
-    x0
-        Initial states. Zero if not specified.
     monitor
         A logging container.
     deterministic
@@ -126,8 +135,9 @@ def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
         - Episode rewards with shape (num_timesteps,).
     """
     t = 0
-    y = env.reset(state_init=x0)
-    x = env.states.cpu().numpy()
+    y = env.reset()
+    x = env.states
+    reward = 0
 
     # cell and hidden state of the LSTM
     lstm_states = None
@@ -143,17 +153,17 @@ def run_single(env: DiGym, model: Union[RecurrentPPO, BaseAlgorithm],
         states.append(x)
         if monitor is not None:
             monitor.update_variables(t, states=x, outputs=y, control=u,
-                                     cost=env.cost)
+                                     cost=-reward)
 
         y, reward, done, info = env.step(u)
         rewards.append(reward)
-        x = env.states.cpu().numpy()
-        t += env.process.dt
+        x = env.states
+        t += env.dt
         episode_starts = done
         if done:
             env.reset()
             break
-    return np.expand_dims(states, 1), rewards
+    return np.concatenate(states), rewards
 
 
 def linear_schedule(initial_value: float, q: float = 0.01
@@ -229,37 +239,63 @@ class MaskingCallback(BaseCallback):
 class LinearRlPipeline(NeuralPerturbationPipeline):
     def __init__(self, config: CfgNode):
         super().__init__(config)
-        self.evaluation_callback = EvaluationCallback()
+        self.evaluation_callback = EvaluationCallback(100, self.evaluate)
 
     def get_device(self) -> torch.device:
         return get_device(self.config)
 
-    @staticmethod
-    def evaluate(model, env, n, filename=None, deterministic=True):
-        return evaluate(model, env, n, filename, deterministic)
+    def evaluate(self, env: DiGym, n: int, filename: Optional[str] = None,
+                 deterministic: Optional[bool] = True
+                 ) -> Tuple[float, float, Optional[plt.Figure]]:
+        """Evaluate RL agent and optionally plot phase diagram.
 
-    def get_environment(self, **kwargs) -> gym.Env:
+        Parameters
+        ----------
+        env
+            The environment to evaluate model in.
+        n
+            Number of evaluation runs.
+        filename
+            If specified, plot phase diagram and save under given name in the
+            mlflow artifact directory.
+        deterministic
+            If `True`, the actions are selected deterministically.
+
+        Returns
+        -------
+        results
+            A tuple with the average reward and episode length.
+        """
+        reward_means, episode_lengths = run_n(n, env, self.model,
+                                              deterministic=deterministic)
+        f = None
+        if filename is not None:
+            states, rewards = run_single(env, self.model)
+            f = plot_phase_diagram(
+                {'x': states[:, 0, 0], 'v': states[:, 0, 1]}, xt=[0, 0],
+                show=False, xlim=[-1, 1], ylim=[-1, 1], draw_endpoints=True)
+            mlflow.log_figure(f, os.path.join('figures', filename))
+        return np.mean(reward_means).item(), np.mean(episode_lengths).item(), f
+
+    def get_environment(self, *args, **kwargs) -> Union[DiGym, TimeLimit]:
         """Create a double integrator gym environment."""
-        neuralsystem_num_outputs = 1
-        environment_num_outputs = 1
-        environment_num_states = 2
+        num_inputs = self.config.process.NUM_INPUTS
+        num_states = self.config.process.NUM_STATES
+        num_outputs = self.config.process.NUM_OUTPUTS
         process_noise = self.config.process.PROCESS_NOISES[0]
         observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
-        device = kwargs['device']
 
-        environment = DiGym(neuralsystem_num_outputs, environment_num_outputs,
-                            environment_num_states, device, process_noise,
-                            observation_noise, dt, cost_threshold=1e-4,
-                            use_observations_in_cost=True)
+        environment = DiGym(num_inputs, num_outputs, num_states, self.device,
+                            process_noise, observation_noise, dt,
+                            cost_threshold=1e-4, use_observations_in_cost=True)
         environment = TimeLimit(environment, num_steps)
         return environment
 
-    def get_model(self, device, freeze_neuralsystem, freeze_controller,
-                  load_weights_from=None, environment: gym.Env = None
-                  ) -> RecurrentPPO:
+    def get_model(self, freeze_neuralsystem, freeze_controller, environment,
+                  load_weights_from=None) -> RecurrentPPO:
         neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
         controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
@@ -272,7 +308,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
         controller = RnnModel(controller_num_states, controller_num_layers,
                               neuralsystem_num_states, neuralsystem_num_states,
-                              activation_rnn, activation_decoder, device,
+                              activation_rnn, activation_decoder, self.device,
                               dtype)
         if load_weights_from is None:
             controller.init_zero()
@@ -287,7 +323,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
                          }
         log_dir = get_artifact_path('tensorboard_log')
         model = RecurrentPPO(
-            MlpRnnPolicy, environment, verbose=0, device=device,
+            MlpRnnPolicy, environment, verbose=0, device=self.device,
             seed=self.config.SEED,
             tensorboard_log=log_dir, policy_kwargs=policy_kwargs, n_epochs=10,
             learning_rate=linear_schedule(learning_rate, 0.005),
@@ -305,7 +341,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         return model
 
     def train(self, perturbation_type, perturbation_level, dropout_probability,
-              device, save_model=True, **kwargs):
+              save_model=True, **kwargs):
         num_epochs = int(self.config.training.NUM_EPOCHS)
         num_steps = self.config.simulation.NUM_STEPS
         T = self.config.simulation.T
@@ -318,7 +354,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         num_test = 100
 
         # Create environment.
-        environment = self.get_environment(device=device, rng=rng)
+        environment = self.get_environment(rng=rng)
 
         # Create model consisting of neural system, controller, and RL agent.
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
@@ -326,27 +362,28 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
-            model = self.get_model(
-                device, freeze_neuralsystem=True, freeze_controller=False,
+            self.model = self.get_model(
+                freeze_neuralsystem=True, freeze_controller=False,
                 environment=environment, load_weights_from=path_model)
         else:
-            model = self.get_model(
-                device, freeze_neuralsystem=False, freeze_controller=True,
+            self.model = self.get_model(
+                freeze_neuralsystem=False, freeze_controller=True,
                 environment=environment)
 
-        controlled_neuralsystem = model.policy.lstm_actor
+        controlled_neuralsystem = self.model.policy.lstm_actor
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
-            add_noise(model, perturbation_type, perturbation_level, dt, rng)
+            add_noise(self.model, perturbation_type, perturbation_level, dt,
+                      rng)
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
-        reward, length = self.evaluate(model, environment, num_test,
-                                       deterministic=False)
+        reward, length, _ = self.evaluate(environment, num_test,
+                                          deterministic=False)
         mlflow.log_metric('training_reward', reward, -1)
-        reward, length = self.evaluate(model, environment, num_test,
-                                       'trajectory_-1.png')
+        reward, length, _ = self.evaluate(environment, num_test,
+                                          'trajectory_-1.png')
         mlflow.log_metric('test_reward', reward, -1)
 
         # Initialize controller weights.
@@ -357,41 +394,45 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
             # accuracy further.
             controlled_neuralsystem.controller.init_nonzero()
 
+        # Reduce controllability and observability of neural system by
+        # dropping out rows from the stimulation and readout matrices of the
+        # controller.
         masker = Masker(controlled_neuralsystem, dropout_probability, rng)
         callbacks = [EveryNTimesteps(int(num_epochs * evaluation_rate),
                                      self.evaluation_callback),
                      MaskingCallback(masker)]
 
         logging.info("Training...")
-        model.learn(num_epochs, callback=callbacks)
+        self.model.learn(num_epochs, callback=callbacks)
+
+        training_reward = self.model.ep_info_buffer[-1]['r']
+        test_reward, length, _ = self.evaluate(environment, num_test)
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
             os.makedirs(os.path.dirname(path_model), exist_ok=True)
-            model.save(path_model)
+            self.model.save(path_model)
             logging.info(f"Saved model to {path_model}.")
 
         # Compute controllability and observability Gramians.
         if is_perturbed:
+            logging.info("Computing Gramians...")
+            gramians = Gramians(controlled_neuralsystem, environment,
+                                self.model.policy.action_net, T)
             with torch.no_grad():
-                logging.info("Computing Gramians...")
-                gramians = Gramians(controlled_neuralsystem, environment,
-                                    model.policy.action_net, T)
                 g_c = gramians.compute_controllability()
                 g_o = gramians.compute_observability()
-                g_c_eig = np.linalg.eig(g_c)
-                g_o_eig = np.linalg.eig(g_o)
-                # Use product of eigenvalue spectrum as scalar matric for
-                # controllability and observability. The larger the better.
-                controllability = np.prod(g_c_eig[0]).item()
-                observability = np.prod(g_o_eig[0]).item()
-                mlflow.log_metrics({'controllability': controllability,
-                                    'observability': observability})
+            g_c_eig = np.linalg.eig(g_c)
+            g_o_eig = np.linalg.eig(g_o)
+            # Use product of eigenvalue spectrum as scalar matric for
+            # controllability and observability. The larger the better.
+            controllability = np.prod(g_c_eig[0]).item()
+            observability = np.prod(g_o_eig[0]).item()
+            mlflow.log_metrics({'controllability': controllability,
+                                'observability': observability})
         else:
             g_c = g_o = None
 
-        training_reward = model.ep_info_buffer[-1]['r']
-        test_reward, length = self.evaluate(model, environment, num_test)
         return {'training_reward': training_reward, 'test_reward': test_reward,
                 'controllability': g_c, 'observability': g_o}
 

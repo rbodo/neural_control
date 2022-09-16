@@ -17,6 +17,8 @@ def get_config():
     config.simulation.NUM_STEPS = 1000
     config.simulation.T = config.simulation.NUM_STEPS / 10
 
+    # Environment
+    config.process.OBSERVATION_INDICES = [0, 1]  # Position, angle
     config.process.PROCESS_NOISES = [0]
     config.process.OBSERVATION_NOISES = [0.002]
 

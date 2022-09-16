@@ -16,8 +16,12 @@ def get_config():
     config.paths.FILEPATH_INPUT_DATA = \
         os.path.abspath(os.path.join(base_path, '..', 'lqr_grid.pkl'))
 
+    # Environment
+    config.process.NUM_INPUTS = 1
+    config.process.NUM_STATES = 2
+    config.process.NUM_OUTPUTS = 2  # Fully observable
     config.process.PROCESS_NOISES = [0.01]
-    config.process.OBSERVATION_NOISES = [0]  # Fully observable, noiseless
+    config.process.OBSERVATION_NOISES = [0]  # Noiseless observations
 
     config.training.NUM_EPOCHS = 10
     config.training.BATCH_SIZE = 32
@@ -28,6 +32,7 @@ def get_config():
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
     config.model.NUM_HIDDEN_CONTROLLER = 40
     config.model.NUM_LAYERS_CONTROLLER = 1
+    config.model.CLOSE_ENVIRONMENT_LOOP = True  # Make env part of graph
 
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False

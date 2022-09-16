@@ -17,6 +17,10 @@ def get_config():
     config.simulation.NUM_STEPS = 300
     config.simulation.T = config.simulation.NUM_STEPS / 10
 
+    # Environment
+    config.process.NUM_INPUTS = 1
+    config.process.NUM_STATES = 2
+    config.process.NUM_OUTPUTS = 1
     config.process.PROCESS_NOISES = [0.01]
     config.process.OBSERVATION_NOISES = [0.1]
 

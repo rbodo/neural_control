@@ -1,10 +1,10 @@
 import logging
 import os
 import sys
-import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
+import gym
 import mlflow
 import mxnet as mx
 import numpy as np
@@ -18,10 +18,10 @@ from yacs.config import CfgNode
 
 from examples import configs
 from src.plotting import plot_phase_diagram
-from src.utils import get_artifact_path, get_data_loaders
-from src.control_systems_mxnet import (RnnModel, DI, Gramians, LQRLoss,
-                                       ClosedControlledNeuralSystem, Masker,
-                                       get_device, ControlledNeuralSystem)
+from src.utils import get_artifact_path, get_data
+from src.control_systems_mxnet import (
+    RnnModel, DI, Gramians, LqrLoss, ClosedControlledNeuralSystem, Masker,
+    get_device, ControlledNeuralSystem, StochasticLinearIOSystem)
 
 
 class NeuralPerturbationPipeline(ABC):
@@ -65,18 +65,27 @@ class NeuralPerturbationPipeline(ABC):
     def __init__(self, config: CfgNode, data_dict: Optional[dict] = None):
         self.config = config
         self.data_dict = data_dict or {}
+        self.device = None
+        self.model = None
 
     @abstractmethod
-    def get_model(self, device: Union[torch.device, mx.context.Context],
-                  freeze_neuralsystem: bool, freeze_controller: bool,
+    def get_environment(self, num_inputs: int, num_states: int,
+                        num_outputs: int, **kwargs
+                        ) -> Union[gym.Env, StochasticLinearIOSystem]:
+        """Create the environment."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_model(self, freeze_neuralsystem: bool, freeze_controller: bool,
+                  environment: Union[gym.Env, mx.gluon.HybridBlock],
                   load_weights_from: Optional[str] = None
                   ) -> ControlledNeuralSystem:
         """Create the model.
 
         Parameters
         ----------
-        device
-            Hardware backend to use (GPU / CPU).
+        environment
+            The environment with which the neural system interacts.
         freeze_neuralsystem
             Whether to train the neural system. Usually turned off while
             perturbing the neural system and training the controller.
@@ -90,9 +99,8 @@ class NeuralPerturbationPipeline(ABC):
 
     @abstractmethod
     def train(self, perturbation_type: str, perturbation_level: float,
-              dropout_probability: float,
-              device: Union[torch.device, mx.context.Context],
-              save_model: Optional[bool] = True, **kwargs) -> dict:
+              dropout_probability: float, save_model: Optional[bool] = True,
+              **kwargs) -> dict:
         """Train the model (consisting of a neural system and a controller).
 
         Parameters
@@ -108,8 +116,6 @@ class NeuralPerturbationPipeline(ABC):
             Probability of dropping out a row in the readout and stimulation
             connection matrix of the controller. Tunes the controllability and
             observability of the neural system.
-        device
-            Hardware backend to use (GPU / CPU).
         save_model
             Whether to save the model in the mlflow artifact directory.
 
@@ -121,7 +127,7 @@ class NeuralPerturbationPipeline(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def evaluate(self, *args, **kwargs) -> float:
+    def evaluate(self, *args, **kwargs) -> Any:
         """Evaluate model."""
         raise NotImplementedError
 
@@ -142,7 +148,7 @@ class NeuralPerturbationPipeline(ABC):
         """
 
         # Select hardware backend.
-        device = self.get_device()
+        self.device = self.get_device()
 
         # We use the mlflow package for tracking experiment results.
         mlflow.set_tracking_uri(os.path.join(
@@ -152,7 +158,7 @@ class NeuralPerturbationPipeline(ABC):
         # Train unperturbed and uncontrolled baseline model (i.e. neural system
         # controlling the double integrator environment).
         mlflow.start_run(run_name='Main')
-        out = self.train('', 0, 0, device, **self.data_dict)
+        out = self.train('', 0, 0, **self.data_dict)
         dfs = [out]
 
         # Remember where the baseline model has been saved.
@@ -188,8 +194,7 @@ class NeuralPerturbationPipeline(ABC):
                         mlflow.start_run(run_name='seed', nested=True)
                         mlflow.log_param('seed', seed)
                         out = self.train(perturbation_type, perturbation_level,
-                                         dropout_probability, device,
-                                         **self.data_dict)
+                                         dropout_probability, **self.data_dict)
                         out.update(perturbation_type=perturbation_type,
                                    perturbation_level=perturbation_level,
                                    dropout_probability=dropout_probability)
@@ -203,40 +208,45 @@ class NeuralPerturbationPipeline(ABC):
 
 
 class LqrPipeline(NeuralPerturbationPipeline):
+    def __init__(self, config: CfgNode, data_dict: Optional[dict] = None):
+        super().__init__(config, data_dict)
+        self.loss_function = None
+
     def get_device(self) -> mx.context.Context:
         return get_device(self.config)
 
-    def get_model(self, device, freeze_neuralsystem, freeze_controller,
-                  load_weights_from: str = None
-                  ) -> ClosedControlledNeuralSystem:
-        environment_num_states = 2
-        environment_num_outputs = 2
-        neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
-        neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
-        neuralsystem_num_outputs = 1
-        controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
-        controller_num_layers = self.config.model.NUM_LAYERS_CONTROLLER
-        activation_rnn = self.config.model.ACTIVATION
-        activation_decoder = None  # Defaults to 'linear'
-        batch_size = self.config.training.BATCH_SIZE
+    def get_environment(self, *args, **kwargs) -> StochasticLinearIOSystem:
+        num_inputs = self.config.process.NUM_INPUTS
+        num_states = self.config.process.NUM_STATES
+        num_outputs = self.config.process.NUM_OUTPUTS
         process_noise = self.config.process.PROCESS_NOISES[0]
         observation_noise = self.config.process.OBSERVATION_NOISES[0]
         T = self.config.simulation.T
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
+        return DI(num_inputs, num_outputs, num_states, self.device,
+                  process_noise,
+                  observation_noise, dt, prefix='environment_')
 
-        environment = DI(neuralsystem_num_outputs, environment_num_outputs,
-                         environment_num_states, device, process_noise,
-                         observation_noise, dt, prefix='environment_')
+    def get_model(self, freeze_neuralsystem, freeze_controller,
+                  environment: StochasticLinearIOSystem,
+                  load_weights_from: Optional[str] = None
+                  ) -> Union[ControlledNeuralSystem,
+                             ClosedControlledNeuralSystem]:
+        neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
+        neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
+        controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
+        controller_num_layers = self.config.model.NUM_LAYERS_CONTROLLER
+        activation_rnn = self.config.model.ACTIVATION
+        activation_decoder = None  # Defaults to 'linear'
+        batch_size = self.config.training.BATCH_SIZE
 
-        neuralsystem = RnnModel(neuralsystem_num_states,
-                                neuralsystem_num_layers,
-                                neuralsystem_num_outputs,
-                                environment_num_outputs,
-                                activation_rnn, activation_decoder,
-                                prefix='neuralsystem_')
+        neuralsystem = RnnModel(
+            neuralsystem_num_states, neuralsystem_num_layers,
+            environment.num_inputs, environment.num_outputs,
+            activation_rnn, activation_decoder, prefix='neuralsystem_')
         if load_weights_from is None:
-            neuralsystem.initialize(mx.init.Xavier(), device)
+            neuralsystem.initialize(mx.init.Xavier(), self.device)
         if freeze_neuralsystem:
             neuralsystem.collect_params().setattr('grad_req', 'null')
 
@@ -245,26 +255,49 @@ class LqrPipeline(NeuralPerturbationPipeline):
                               activation_rnn, activation_decoder,
                               prefix='controller_')
         if load_weights_from is None:
-            controller.initialize(mx.init.Zero(), device)
+            controller.initialize(mx.init.Zero(), self.device)
         if freeze_controller:
             controller.collect_params().setattr('grad_req', 'null')
 
-        model = ClosedControlledNeuralSystem(
-            environment, neuralsystem, controller, device, batch_size,
-            num_steps)
+        if self.config.model.CLOSE_ENVIRONMENT_LOOP:
+            model = ClosedControlledNeuralSystem(
+                environment, neuralsystem, controller, self.device, batch_size,
+                self.config.simulation.NUM_STEPS)
+        else:
+            model = ControlledNeuralSystem(neuralsystem, controller,
+                                           self.device, batch_size)
         if load_weights_from is not None:
-            model.load_parameters(load_weights_from, ctx=device)
+            model.load_parameters(load_weights_from, ctx=self.device)
 
         model.hybridize(active=True, static_alloc=True, static_shape=True)
 
         return model
 
-    def train(self, perturbation_type, perturbation_level, dropout_probability,
-              device, save_model=True, **kwargs):
-        T = self.config.simulation.T
-        dt = T / self.config.simulation.NUM_STEPS
+    def get_loss_function(self, *args, **kwargs) -> mx.gluon.HybridBlock:
+        """Define loss function based on LQR."""
         q = self.config.controller.cost.lqr.Q
         r = self.config.controller.cost.lqr.R
+        Q = q * mx.nd.eye(self.model.environment.num_states, ctx=self.device)
+        R = r * mx.nd.eye(self.model.environment.num_inputs, ctx=self.device)
+        return LqrLoss(kwargs['dt'], Q=Q, R=R)
+
+    def get_loss(self, data: mx.nd.NDArray,
+                 label: Optional[mx.nd.NDArray] = None) -> mx.nd.NDArray:
+        # Move time axis from last to first position to conform to RNN
+        # convention.
+        data = mx.nd.moveaxis(data, -1, 0)
+        # Use only first time step.
+        x0 = data[:1].as_in_context(self.device)
+        with autograd.record():
+            u, x = self.model(x0)
+            u = mx.nd.moveaxis(u, 0, -1)
+            x = mx.nd.moveaxis(x, 0, -1)
+            return self.loss_function(x, u)
+
+    def train(self, perturbation_type, perturbation_level, dropout_probability,
+              save_model=True, **kwargs):
+        T = self.config.simulation.T
+        dt = T / self.config.simulation.NUM_STEPS
         seed = self.config.SEED
 
         # Set random seed.
@@ -272,37 +305,38 @@ class LqrPipeline(NeuralPerturbationPipeline):
         np.random.seed(seed)
         rng = np.random.default_rng(seed)
 
+        # Create environment.
+        environment = self.get_environment()
+
         # Create model consisting of neural system, controller and environment.
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
         if is_perturbed:
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
-            model = self.get_model(device, freeze_neuralsystem=True,
-                                   freeze_controller=False,
-                                   load_weights_from=path_model)
+            self.model = self.get_model(
+                freeze_neuralsystem=True, freeze_controller=False,
+                environment=environment, load_weights_from=path_model)
         else:
-            model = self.get_model(device, freeze_neuralsystem=False,
-                                   freeze_controller=True)
+            self.model = self.get_model(
+                freeze_neuralsystem=False, freeze_controller=True,
+                environment=environment)
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
-            model.add_noise(perturbation_type, perturbation_level, dt, rng)
+            self.model.add_noise(perturbation_type, perturbation_level, dt,
+                                 rng)
 
-        # Define loss function based on LQR.
-        Q = q * mx.nd.eye(model.environment.num_states, ctx=device)
-        R = r * mx.nd.eye(model.environment.num_inputs, ctx=device)
-        loss_function = LQRLoss(dt, Q=Q, R=R)
+        self.loss_function = self.get_loss_function(dt=dt)
 
         data_train = kwargs['data_train']
         data_test = kwargs['data_test']
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
-        test_loss = self.evaluate(model, data_train, loss_function)
+        test_loss = self.evaluate(data_train)
         mlflow.log_metric('training_loss', test_loss, -1)
-        test_loss = self.evaluate(model, data_test, loss_function,
-                                  'trajectory_-1.png')
+        test_loss = self.evaluate(data_test, 'trajectory_-1.png')
         mlflow.log_metric('test_loss', test_loss, -1)
 
         # Initialize controller weights.
@@ -310,18 +344,18 @@ class LqrPipeline(NeuralPerturbationPipeline):
             # Initialize controller to non-zero weights only after computing
             # baseline accuracy of perturbed network before training. Otherwise
             # the untrained controller output will degrade accuracy further.
-            model.controller.initialize(mx.init.Xavier(), device,
-                                        force_reinit=True)
+            self.model.controller.initialize(mx.init.Xavier(), self.device,
+                                             force_reinit=True)
 
         trainer = mx.gluon.Trainer(
-            model.collect_params(), self.config.training.OPTIMIZER,
+            self.model.collect_params(), self.config.training.OPTIMIZER,
             {'learning_rate': self.config.training.LEARNING_RATE,
-             'rescale_grad': 1 / model.batch_size})
+             'rescale_grad': 1 / self.model.batch_size})
 
         # Reduce controllability and observability of neural system by
         # dropping out rows from the stimulation and readout matrices of the
         # controller.
-        masker = Masker(model, dropout_probability, rng)
+        masker = Masker(self.model, dropout_probability, rng)
         masker.apply_mask()
 
         # Train neural system (if unperturbed) or controller (if perturbed).
@@ -329,77 +363,55 @@ class LqrPipeline(NeuralPerturbationPipeline):
         training_loss = test_loss = None
         for epoch in trange(self.config.training.NUM_EPOCHS, desc='epoch'):
             training_loss = 0
-            tic = time.time()
-            for batch_idx, (data, label) in tenumerate(data_train,
-                                                       desc='batch',
-                                                       leave=False):
-                # Move time axis from last to first position to conform to RNN
-                # convention.
-                data = mx.nd.moveaxis(data, -1, 0)
-                # Use only first time step.
-                x0 = data[:1].as_in_context(device)
-                with autograd.record():
-                    u, x = model(x0)
-                    u = mx.nd.moveaxis(u, 0, -1)
-                    x = mx.nd.moveaxis(x, 0, -1)
-                    loss = loss_function(x, u)
-
+            for batch_idx, (data, label) in tenumerate(
+                    data_train, desc='batch', leave=False):
+                loss = self.get_loss(data, label)
                 loss.backward()
-                trainer.step(model.batch_size)
+                trainer.step(self.model.batch_size)
                 masker.apply_mask()
                 training_loss += loss.mean().asscalar()
 
             training_loss /= len(data_train)
-            test_loss = self.evaluate(model, data_test, loss_function,
-                                      f'trajectory_{epoch}.png')
-            logging.debug(
-                "Epoch {:3} ({:2.1f} s): loss {:.3e}, test loss {:.3e}."
-                "".format(epoch, time.time() - tic, training_loss,
-                          test_loss))
+            test_loss = self.evaluate(data_test, f'trajectory_{epoch}.png')
             mlflow.log_metric('training_loss', training_loss, epoch)
             mlflow.log_metric('test_loss', test_loss, epoch)
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
             os.makedirs(os.path.dirname(path_model), exist_ok=True)
-            model.save_parameters(path_model)
+            self.model.save_parameters(path_model)
             logging.info(f"Saved model to {path_model}.")
 
         # Compute controllability and observability Gramians.
         if is_perturbed:
             logging.info("Computing Gramians...")
-            gramians = Gramians(model, model.environment, device, dt, T)
+            gramians = Gramians(self.model, environment, self.device, dt, T)
             g_c = gramians.compute_controllability()
             g_o = gramians.compute_observability()
             g_c_eig = np.linalg.eig(g_c)
             g_o_eig = np.linalg.eig(g_o)
             # Use product of eigenvalue spectrum as scalar matric for
             # controllability and observability. The larger the better.
-            mlflow.log_metrics({'controllability': np.prod(g_c_eig[0]).item(),
-                                'observability': np.prod(g_o_eig[0]).item()})
+            controllability = np.prod(g_c_eig[0]).item()
+            observability = np.prod(g_o_eig[0]).item()
+            mlflow.log_metrics({'controllability': controllability,
+                                'observability': observability})
         else:
             g_c = g_o = None
 
         return {'training_loss': training_loss, 'test_loss': test_loss,
                 'controllability': g_c, 'observability': g_o}
 
-    @staticmethod
-    def evaluate(model: ClosedControlledNeuralSystem, data_loader: DataLoader,
-                 loss_function: Union[torch.nn.Module, mx.gluon.HybridBlock],
+    def evaluate(self, data_loader: DataLoader,
                  filename: Optional[str] = None) -> float:
         """
         Evaluate model.
 
         Parameters
         ----------
-        model
-            Neural system and controller. Possibly includes the differentiable
-            environment in the computational graph.
         data_loader
             Data loaders for train and test set. Contain trajectories in state
             space to provide initial values or learning signal.
-        loss_function
-            Loss function used to evaluate performance. E.g. L2 or LQR.
         filename
             If specified, create an example phase diagram and save under given
             name.
@@ -414,11 +426,11 @@ class LqrPipeline(NeuralPerturbationPipeline):
         environment_states = data = None
         for data, label in data_loader:
             data = mx.nd.moveaxis(data, -1, 0)
-            data = data.as_in_context(model.context)
-            neuralsystem_outputs, environment_states = model(data[:1])
+            data = data.as_in_context(self.device)
+            neuralsystem_outputs, environment_states = self.model(data[:1])
             neuralsystem_outputs = mx.nd.moveaxis(neuralsystem_outputs, 0, -1)
             environment_states = mx.nd.moveaxis(environment_states, 0, -1)
-            loss = loss_function(environment_states, neuralsystem_outputs)
+            loss = self.loss_function(environment_states, neuralsystem_outputs)
             validation_loss += loss.mean().asscalar()
         if filename is not None:
             fig = plot_phase_diagram({'x': environment_states[0, 0].asnumpy(),
@@ -431,19 +443,6 @@ class LqrPipeline(NeuralPerturbationPipeline):
             fig.legend()
             mlflow.log_figure(fig, os.path.join('figures', filename))
         return validation_loss / len(data_loader)
-
-
-def get_data(config: CfgNode, variable: str):
-    """Return training and test data loader as dict.
-
-    Contains trajectories of a classic LQR controller in the double integrator
-    state space with initial values sampled from a jittered rectangular grid.
-    """
-
-    path_data = config.paths.FILEPATH_INPUT_DATA
-    data = pd.read_pickle(path_data)
-    data_test, data_train = get_data_loaders(data, config, variable)
-    return dict(data_train=data_train, data_test=data_test)
 
 
 if __name__ == '__main__':
