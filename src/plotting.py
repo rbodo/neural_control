@@ -58,7 +58,7 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
         fig = plt.figure()
 
     # Draw trajectory.
-    plt.plot(states[i], states[j], label=line_label)
+    p = plt.plot(states[i], states[j], label=line_label)
     plt.xlabel(labels[i])
     plt.ylabel(labels[j])
 
@@ -68,8 +68,9 @@ def plot_phase_diagram(state_dict, num_states=None, odefunc=None, W=None,
 
     # Draw endpoints.
     if draw_endpoints:
-        plt.scatter(states[i][0], states[j][0], s=32, marker='x')
-        plt.scatter(states[i][-1], states[j][-1], s=32, marker='o')
+        c = p[-1].get_color()
+        plt.scatter(states[i][0], states[j][0], s=32, color=c, marker='x')
+        plt.scatter(states[i][-1], states[j][-1], s=32, color=c, marker='o')
 
     # Draw vector field.
     if odefunc is not None:

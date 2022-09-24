@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, List, Dict
 
 import mxnet as mx
 import numpy as np
@@ -280,6 +280,7 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
         self.controller = controller
         self.context = device
         self.batch_size = batch_size
+        self._weight_hashes = None
 
     def hybrid_forward(self, F, x, **kwargs):
         neuralsystem_states, controller_states = self.begin_state(F)
@@ -334,6 +335,25 @@ class ControlledNeuralSystem(mx.gluon.HybridBlock):
             idxs = np.nonzero(weights.data().abs().asnumpy() < atol)
             if len(idxs[0]):
                 weights.data()[idxs] = 0
+
+    def get_weight_hash(self) -> Dict[str, List[int]]:
+        """Get the hash values of the model parameters."""
+        return {'neuralsystem': to_hash(self.neuralsystem.collect_params()),
+                'controller': to_hash(self.controller.collect_params())}
+
+    def cache_weight_hash(self):
+        """Store the hash values of the model parameters."""
+        self._weight_hashes = self.get_weight_hash()
+
+    def is_static(self, key: str, weight_hashes: Dict[str, List[int]]) -> bool:
+        return np.array_equal(weight_hashes[key], self._weight_hashes[key])
+
+    def assert_plasticity(self, freeze_neuralsystem: bool,
+                          freeze_controller: bool):
+        """Make sure only the allowed weights have been modified."""
+        hashes = self.get_weight_hash()
+        assert self.is_static('neuralsystem', hashes) == freeze_neuralsystem
+        assert self.is_static('controller', hashes) == freeze_controller
 
 
 class ClosedControlledNeuralSystem(ControlledNeuralSystem):
@@ -568,6 +588,8 @@ class Masker:
         n = self.model.neuralsystem.num_hidden
         self._controllability_mask = np.nonzero(rng.binomial(1, self.p, n))
         self._observability_mask = np.nonzero(rng.binomial(1, self.p, n))
+        self.controllability = 1 - len(self._controllability_mask[0]) / n
+        self.observability = 1 - len(self._observability_mask[0]) / n
 
     def apply_mask(self):
         if self.p == 0:
@@ -622,7 +644,8 @@ class Gramians(mx.gluon.HybridBlock):
         return emgr(None, 1,
                     [self.num_inputs, self.num_hidden, self.num_outputs],
                     [self.dt, self.T - self.dt], kind, ode=self._ode,
-                    us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden))
+                    us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden),
+                    nf=12*[0]+[3])  # Normalize trajectories
 
     def compute_controllability(self):
         self._return_observations = False
@@ -680,3 +703,9 @@ def get_device(config: CfgNode) -> mx.context.Context:
     os.environ['MXNET_CUDNN_LIB_CHECKING'] = '0'
 
     return mx.gpu(int(config.GPU)) if mx.context.num_gpus() > 0 else mx.cpu()
+
+
+def to_hash(params: mx.gluon.ParameterDict) -> List[int]:
+    """Compute the hash values of a list of weight matrices."""
+    return [hash(tuple(param.data().asnumpy().ravel()))
+            for param in params.values()]

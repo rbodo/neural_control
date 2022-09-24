@@ -9,7 +9,7 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 8
+    config.GPU = 7
     config.EXPERIMENT_NAME = 'linear_rnn_lqg'
 
     base_path = os.path.join(os.path.expanduser(
@@ -23,10 +23,11 @@ def get_config():
     config.process.NUM_STATES = 2
     config.process.NUM_OUTPUTS = 1
     config.process.PROCESS_NOISES = [0.01]
-    config.process.OBSERVATION_NOISES = np.logspace(-1, 0, 5,
-                                                    dtype='float32').tolist()[:1]
+    config.process.OBSERVATION_NOISES = \
+        np.logspace(-1, 0, 5, dtype='float32').tolist()[:1]
 
-    config.training.NUM_EPOCHS = 10
+    config.training.NUM_EPOCHS_NEURALSYSTEM = 10
+    config.training.NUM_EPOCHS_CONTROLLER = 4
     config.training.BATCH_SIZE = 32
     config.training.OPTIMIZER = 'adam'
 
@@ -41,11 +42,12 @@ def get_config():
     # Perturbation of neural system
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
-    config.perturbation.PERTURBATION_TYPES = \
-        ['sensor', 'actuator', 'processor']
-    config.perturbation.PERTURBATION_LEVELS = [0.5, 1, 2]  # Todo: Adapt per perturbation type
-    config.perturbation.DROPOUT_PROBABILITIES = [0]  # , 0.1, 0.5, 0.7, 0.9]
+    config.perturbation.PERTURBATIONS = [
+        ('sensor', [0.1, 0.5, 1, 2, 3]),
+        ('actuator', [0.1, 0.5, 1, 2, 3]),
+        ('processor', [0.1, 0.5, 1, 2, 3])]
+    config.perturbation.DROPOUT_PROBABILITIES = [0]#, 0.1, 0.5, 0.7, 0.9]
 
-    config.SEEDS = [42]  # , 234]
+    config.SEEDS = [42]#, 234, 55, 2, 5632]
 
     return config

@@ -2,7 +2,7 @@ import os
 import time
 from collections import OrderedDict
 from itertools import product
-from typing import Tuple, List, Union, Optional, Iterable
+from typing import Tuple, List, Union, Optional, Iterable, Callable
 from urllib.parse import unquote, urlparse
 
 import mlflow
@@ -407,3 +407,17 @@ def get_data(config: CfgNode, variable: str):
     data = pd.read_pickle(path_data)
     data_test, data_train = get_data_loaders(data, config, variable)
     return dict(data_train=data_train, data_test=data_test)
+
+
+def gramian2metric(gramian: np.ndarray, metric: Optional[Callable] = np.prod
+                   ) -> float:
+    """Compute a scalar metric from a Gramian matrix.
+
+    Use mean or product of eigenvalue spectrum as scalar matric for
+    controllability and observability. The larger the better. Product reflects
+    better the fact that controllability goes to zero when one eigenvalue is
+    zero, but may result in numerical instabilities if Gramian is
+    high-dimensional.
+    """
+    w, v = np.linalg.eig(gramian)
+    return metric(w).item()

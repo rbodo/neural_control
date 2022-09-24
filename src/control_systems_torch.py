@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Union, Tuple, Optional, Callable
+from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator
 
 import numpy as np
 import gym
@@ -239,6 +239,7 @@ class ControlledRnn(nn.Module):
         self.input_size = self.neuralsystem.input_size
         self.num_layers = self.neuralsystem.num_layers
         self.hidden_size = self.neuralsystem.hidden_size
+        self._weight_hashes = None
 
     def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
                 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -269,6 +270,25 @@ class ControlledRnn(nn.Module):
                                           self.hidden_size, **self.tkwargs)
         controller_states = self.controller.begin_state(batch_size)
         return neuralsystem_states, controller_states
+
+    def get_weight_hash(self) -> Dict[str, List[int]]:
+        """Get the hash values of the model parameters."""
+        return {'neuralsystem': to_hash(self.neuralsystem.parameters()),
+                'controller': to_hash(self.controller.parameters())}
+
+    def cache_weight_hash(self):
+        """Store the hash values of the model parameters."""
+        self._weight_hashes = self.get_weight_hash()
+
+    def is_static(self, key: str, weight_hashes: Dict[str, List[int]]) -> bool:
+        return np.array_equal(weight_hashes[key], self._weight_hashes[key])
+
+    def assert_plasticity(self, freeze_neuralsystem: bool,
+                          freeze_controller: bool):
+        """Make sure only the allowed weights have been modified."""
+        hashes = self.get_weight_hash()
+        assert self.is_static('neuralsystem', hashes) == freeze_neuralsystem
+        assert self.is_static('controller', hashes) == freeze_controller
 
 
 class DiMlp(MLP):
@@ -399,6 +419,8 @@ class Masker:
         n = self.model.hidden_size
         self._controllability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
         self._observability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
+        self.controllability = 1 - len(self._controllability_mask) / n
+        self.observability = 1 - len(self._observability_mask) / n
 
     def apply_mask(self):
         if self.p == 0:
@@ -460,7 +482,8 @@ class Gramians(nn.Module):
         return emgr(None, 1,
                     [self.num_inputs, self.num_hidden, self.num_outputs],
                     [self.dt, self.T - self.dt], kind, ode=self._ode,
-                    us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden))
+                    us=np.zeros(self.num_inputs), xs=np.zeros(self.num_hidden),
+                    nf=12*[0]+[3])  # Normalize trajectories
 
     def compute_controllability(self) -> np.ndarray:
         self._return_observations = False
@@ -487,3 +510,8 @@ def asnumpy(x: torch.Tensor) -> np.ndarray:
 
 def astensor(x: np.ndarray, **kwargs) -> torch.Tensor:
     return torch.tensor(x, **kwargs)
+
+
+def to_hash(params: Iterator[torch.nn.Parameter]) -> List[int]:
+    """Compute the hash values of a list of weight matrices."""
+    return [hash(tuple(param.data.cpu().numpy().ravel())) for param in params]

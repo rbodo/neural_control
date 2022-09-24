@@ -82,7 +82,7 @@ class EvaluationCallback(BaseCallback):
         n = self.n_calls
         env = self.locals['env'].envs[0]
         episode_reward, episode_length, figure = self.evaluate(
-            env, self.num_test, f'figures/trajectory_{n}.png')
+            env, self.num_test, f'trajectory_{n}.png')
         self.logger.record('trajectory/eval', Figure(figure, close=True),
                            exclude=('stdout', 'log', 'json', 'csv'))
         self.logger.record('test/episode_reward', episode_reward)
@@ -94,6 +94,9 @@ class EvaluationCallback(BaseCallback):
                           value=self.model.ep_info_buffer[-1]['r'], step=n)
         plt.close()
         return True
+
+    def reset(self):
+        self.n_calls = 0
 
 
 def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
@@ -342,12 +345,11 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
     def train(self, perturbation_type, perturbation_level, dropout_probability,
               save_model=True, **kwargs):
-        num_epochs = int(self.config.training.NUM_EPOCHS)
         num_steps = self.config.simulation.NUM_STEPS
         T = self.config.simulation.T
         dt = T / num_steps
         seed = self.config.SEED
-        evaluation_rate = 0.2
+        evaluate_every_n = 5000
         torch.random.manual_seed(seed)
         np.random.seed(seed)
         rng = np.random.default_rng(seed)
@@ -359,16 +361,21 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         # Create model consisting of neural system, controller, and RL agent.
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
         if is_perturbed:
+            freeze_neuralsystem = True
+            freeze_controller = False
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_neuralsystem=True, freeze_controller=False,
-                environment=environment, load_weights_from=path_model)
+                freeze_neuralsystem, freeze_controller, environment,
+                load_weights_from=path_model)
+            num_epochs = int(self.config.training.NUM_EPOCHS_CONTROLLER)
         else:
+            freeze_neuralsystem = False
+            freeze_controller = True
             self.model = self.get_model(
-                freeze_neuralsystem=False, freeze_controller=True,
-                environment=environment)
+                freeze_neuralsystem, freeze_controller, environment)
+            num_epochs = int(self.config.training.NUM_EPOCHS_NEURALSYSTEM)
 
         controlled_neuralsystem = self.model.policy.lstm_actor
 
@@ -398,15 +405,21 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         # dropping out rows from the stimulation and readout matrices of the
         # controller.
         masker = Masker(controlled_neuralsystem, dropout_probability, rng)
-        callbacks = [EveryNTimesteps(int(num_epochs * evaluation_rate),
+        masker.apply_mask()
+        callbacks = [EveryNTimesteps(evaluate_every_n,
                                      self.evaluation_callback),
                      MaskingCallback(masker)]
+        self.evaluation_callback.reset()
+
+        # Store the hash values of model weights so we can check later that
+        # only the parts were trained that we wanted.
+        controlled_neuralsystem.cache_weight_hash()
 
         logging.info("Training...")
         self.model.learn(num_epochs, callback=callbacks)
 
-        training_reward = self.model.ep_info_buffer[-1]['r']
-        test_reward, length, _ = self.evaluate(environment, num_test)
+        controlled_neuralsystem.assert_plasticity(freeze_neuralsystem,
+                                                  freeze_controller)
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
@@ -415,26 +428,18 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
             logging.info(f"Saved model to {path_model}.")
 
         # Compute controllability and observability Gramians.
-        if is_perturbed:
-            logging.info("Computing Gramians...")
-            gramians = Gramians(controlled_neuralsystem, environment,
-                                self.model.policy.action_net, T)
-            with torch.no_grad():
-                g_c = gramians.compute_controllability()
-                g_o = gramians.compute_observability()
-            g_c_eig = np.linalg.eig(g_c)
-            g_o_eig = np.linalg.eig(g_o)
-            # Use product of eigenvalue spectrum as scalar matric for
-            # controllability and observability. The larger the better.
-            controllability = np.prod(g_c_eig[0]).item()
-            observability = np.prod(g_o_eig[0]).item()
-            mlflow.log_metrics({'controllability': controllability,
-                                'observability': observability})
-        else:
-            g_c = g_o = None
+        logging.info("Computing Gramians...")
+        gramians = Gramians(controlled_neuralsystem, environment,
+                            self.model.policy.action_net, T)
+        with torch.no_grad():
+            g_c = gramians.compute_controllability()
+            g_o = gramians.compute_observability()
 
-        return {'training_reward': training_reward, 'test_reward': test_reward,
-                'controllability': g_c, 'observability': g_o}
+        np.savez_compressed(get_artifact_path('gramians.npz'),
+                            controllability_gramian=g_c,
+                            observability_gramian=g_o)
+        mlflow.log_metrics({'controllability': masker.controllability,
+                            'observability': masker.observability})
 
 
 if __name__ == '__main__':

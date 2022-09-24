@@ -1,13 +1,18 @@
 import logging
+import os
 import sys
 from typing import Optional
 
+import mlflow
 import mxnet as mx
 from mxnet import autograd
 from torch.utils.data import DataLoader
 
 from examples import configs
 from examples.linear_rnn_lqr import LqrPipeline
+from src.control_systems_mxnet import StochasticLinearIOSystem, \
+    ClosedControlledNeuralSystem
+from src.plotting import plot_phase_diagram
 from src.utils import get_data
 
 
@@ -30,12 +35,17 @@ class LqgPipeline(LqrPipeline):
             return self.loss_function(u, label)
 
     def evaluate(self, data_loader: DataLoader,
+                 environment: Optional[StochasticLinearIOSystem] = None,
                  filename: Optional[str] = None) -> float:
         """
         Evaluate model.
 
         Parameters
         ----------
+        environment
+            The environment with which the neural system interacts. Can be None
+            if we evaluate only on pre-recorded trajectories from
+            `data_loader`.
         data_loader
             Data loaders for train and test set. Contain trajectories in state
             space to provide initial values or learning signal.
@@ -58,6 +68,21 @@ class LqgPipeline(LqrPipeline):
             neuralsystem_outputs = mx.nd.moveaxis(neuralsystem_outputs, 0, -1)
             loss = self.loss_function(neuralsystem_outputs, label)
             validation_loss += loss.mean().asscalar()
+        if filename is not None:
+            model = ClosedControlledNeuralSystem(
+                environment, self.model.neuralsystem, self.model.controller,
+                self.device, self.model.batch_size,
+                self.config.simulation.NUM_STEPS)
+            shape = (1, self.model.batch_size, environment.num_states)
+            x0 = mx.random.uniform(-0.5, 0.5, shape, environment.dtype,
+                                   self.device)
+            neuralsystem_outputs, environment_states = model(x0)
+            environment_states = mx.nd.moveaxis(environment_states, 0, -1)
+            fig = plot_phase_diagram({'x': environment_states[0, 0].asnumpy(),
+                                      'v': environment_states[0, 1].asnumpy()},
+                                     xt=[0, 0], show=False, xlim=[-1, 1],
+                                     ylim=[-1, 1])
+            mlflow.log_figure(fig, os.path.join('figures', filename))
         return validation_loss / len(data_loader)
 
 

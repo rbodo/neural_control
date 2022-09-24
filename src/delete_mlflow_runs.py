@@ -3,12 +3,16 @@ import shutil
 import sys
 
 import mlflow
-from mlflow.entities import ViewType
 
-experiment_id = '0'
-path = '/home/bodrue/Data/neural_control/double_integrator/rnn_controller'
+experiment_id = '1'
+label = 'linear_rnn_lqr'
+tag = '2022-09-21_17:29:07'
+path = os.path.expanduser(f'~/Data/neural_control/{label}')
 os.chdir(path)
-for run in mlflow.list_run_infos(experiment_id, ViewType.DELETED_ONLY):
-    shutil.rmtree(os.path.join(path, 'mlruns', experiment_id, run.run_id))
+runs = mlflow.search_runs([experiment_id])
+runs_to_delete = runs.loc[runs['tags.main_start_time'] != tag]
+for run_id in runs_to_delete['run_id']:
+    # mlflow.delete_run(run_id)  # Only changes STATUS flag
+    shutil.rmtree(os.path.join(path, 'mlruns', experiment_id, run_id))
 
 sys.exit()

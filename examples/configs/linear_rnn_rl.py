@@ -7,7 +7,7 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 8
+    config.GPU = 7
     config.EXPERIMENT_NAME = 'linear_rnn_rl'
 
     base_path = os.path.join(os.path.expanduser(
@@ -24,7 +24,8 @@ def get_config():
     config.process.PROCESS_NOISES = [0.01]
     config.process.OBSERVATION_NOISES = [0.1]
 
-    config.training.NUM_EPOCHS = 5e5
+    config.training.NUM_EPOCHS_NEURALSYSTEM = 5e5
+    config.training.NUM_EPOCHS_CONTROLLER = 1e5
     config.training.BATCH_SIZE = None
     config.training.LEARNING_RATE = 2e-4
 
@@ -36,11 +37,12 @@ def get_config():
 
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
-    config.perturbation.PERTURBATION_TYPES = \
-        ['sensor', 'actuator', 'processor']
-    config.perturbation.PERTURBATION_LEVELS = [0.5]  # , 1, 2]  # Todo: Adapt per perturbation type
-    config.perturbation.DROPOUT_PROBABILITIES = [0.1]  # [0, 0.1, 0.5, 0.7, 0.9]
+    config.perturbation.PERTURBATIONS = [
+        ('sensor', [0.5, 1, 2, 4, 8]),
+        ('actuator', [0.0001, 0.0005, 0.001, 0.05, 0.1]),
+        ('processor', [0.0001, 0.0005, 0.001, 0.05, 0.1])]
+    config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
 
-    config.SEEDS = [42]  # , 234]
+    config.SEEDS = [43, 234, 55, 2, 5632]
 
     return config

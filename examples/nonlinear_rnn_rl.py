@@ -50,7 +50,7 @@ class NonlinearRlPipeline(LinearRlPipeline):
             f = plot_phase_diagram(
                 {'x': states[:, 0, 1], 'v': states[:, 0, 3]}, show=False,
                 draw_endpoints=True, fig=f,
-                line_label='angle, anglular velocity')
+                line_label='angle, angular velocity')
             plt.legend()
             mlflow.log_figure(f, os.path.join('figures', filename))
         return np.mean(reward_means).item(), np.mean(episode_lengths).item(), f

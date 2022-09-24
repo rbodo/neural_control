@@ -2,13 +2,13 @@ import logging
 import os
 import sys
 from abc import ABC, abstractmethod
+import time
 from typing import Optional, Union, Any
 
 import gym
 import mlflow
 import mxnet as mx
 import numpy as np
-import pandas as pd
 from mxnet import autograd
 import torch
 from torch.utils.data import DataLoader
@@ -67,6 +67,7 @@ class NeuralPerturbationPipeline(ABC):
         self.data_dict = data_dict or {}
         self.device = None
         self.model = None
+        self._runs = None  # Previous runs to resume.
 
     @abstractmethod
     def get_environment(self, num_inputs: int, num_states: int,
@@ -136,6 +137,41 @@ class NeuralPerturbationPipeline(ABC):
         """Get hardware backend to run on."""
         raise NotImplementedError
 
+    def get_run_id(self, conditions: dict) -> Union[str, None]:
+        """Get id of run that meets `conditions` and is unfinished.
+
+        Parameters
+        ----------
+        conditions
+            Dictionary of conditions (on tags, metrics, params, ...) that the
+            run should meet.
+
+        Returns
+        -------
+        run_id
+            ID of run that meets conditions and is unfinished. None otherwise.
+        """
+
+        resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
+        if not resume_experiment:
+            return
+        if self._runs is None:
+            self._runs = mlflow.search_runs(
+                experiment_names=[self.config.EXPERIMENT_NAME],
+                filter_string=f'tags.main_start_time = "{resume_experiment}"')
+        mask = np.prod([self._runs[key] == value
+                        for key, value in conditions.items()], 0)
+        idx = self._runs.loc[mask.astype(bool)].index
+        if len(idx) > 1:
+            raise AssertionError("Couldn't find unique run to resume.")
+        if len(idx) == 1:
+            idx = idx[0]
+            if self._runs['status'][idx] in ['UNFINISHED', 'RUNNING']:
+                run_id = self._runs['run_id'][idx]
+                logging.info(f"Resuming unfinished run {run_id} "
+                             f"with conditions {conditions}.")
+                return run_id
+
     def main(self):
         """Run the pipeline.
 
@@ -151,59 +187,103 @@ class NeuralPerturbationPipeline(ABC):
         self.device = self.get_device()
 
         # We use the mlflow package for tracking experiment results.
+        resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
+        tags = {'main_start_time': resume_experiment
+                or time.strftime('%Y-%m-%d_%H:%M:%S')}
         mlflow.set_tracking_uri(os.path.join(
             'file:' + self.config.paths.BASE_PATH, 'mlruns'))
         mlflow.set_experiment(self.config.EXPERIMENT_NAME)
 
-        # Train unperturbed and uncontrolled baseline model (i.e. neural system
-        # controlling the double integrator environment).
-        mlflow.start_run(run_name='Main')
-        out = self.train('', 0, 0, **self.data_dict)
-        dfs = [out]
-
-        # Remember where the baseline model has been saved.
-        self.config.paths.FILEPATH_MODEL = get_artifact_path(
-            'models/rnn.params')
-        with open(get_artifact_path('config.txt'), 'w') as f:
-            f.write(self.config.dump())
-
-        # Return here if all we want is the baseline model.
-        if self.config.perturbation.SKIP_PERTURBATION:
-            pd.DataFrame(dfs).to_pickle(get_artifact_path('output.pkl'))
-            mlflow.end_run()
+        run_name = 'Main'
+        conditions = {'tags.mlflow.runName': run_name}
+        run_id = self.get_run_id(conditions)
+        if resume_experiment and run_id is None:
             return
+        mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
-        # Get perturbation configuration.
-        perturbation_types = self.config.perturbation.PERTURBATION_TYPES
-        perturbation_levels = self.config.perturbation.PERTURBATION_LEVELS
-        dropout_probabilities = self.config.perturbation.DROPOUT_PROBABILITIES
+        run_name = 'seed'
+        for seed in tqdm(self.config.SEEDS, run_name, leave=False):
+            self.config.SEED = seed
+            conditions['tags.mlflow.runName'] = run_name
+            conditions['params.seed'] = str(seed)
+            run_id = self.get_run_id(conditions)
+            if resume_experiment and run_id is None:
+                continue
+            mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
 
-        # Sweep over perturbation types and levels, degrees of controllability
-        # and observability, and repeat for multiple random seeds.
-        for perturbation_type in tqdm(perturbation_types, 'perturbation_type', leave=False):
-            mlflow.start_run(run_name='Perturbation type', nested=True)
-            mlflow.log_param('perturbation_type', perturbation_type)
-            for perturbation_level in tqdm(perturbation_levels, 'perturbation_level', leave=False):
-                mlflow.start_run(run_name='Perturbation level', nested=True)
-                mlflow.log_param('perturbation_level', perturbation_level)
-                for dropout_probability in tqdm(dropout_probabilities, 'dropout_probability', leave=False):
-                    mlflow.start_run(run_name='Dropout probability', nested=True)
-                    mlflow.log_param('dropout_probability', dropout_probability)
-                    for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
-                        self.config.SEED = seed
-                        mlflow.start_run(run_name='seed', nested=True)
-                        mlflow.log_param('seed', seed)
-                        out = self.train(perturbation_type, perturbation_level,
-                                         dropout_probability, **self.data_dict)
-                        out.update(perturbation_type=perturbation_type,
-                                   perturbation_level=perturbation_level,
-                                   dropout_probability=dropout_probability)
-                        dfs.append(out)
+            # Train unperturbed and uncontrolled baseline model (i.e. neural
+            # system controlling the double integrator environment).
+            perturbation_type = ''
+            perturbation_level = 0
+            dropout_probability = 0
+            mlflow.log_params({'seed': seed,
+                               'perturbation_type': perturbation_type,
+                               'perturbation_level': perturbation_level,
+                               'dropout_probability': dropout_probability})
+            self.train(perturbation_type, perturbation_level,
+                       dropout_probability, **self.data_dict)
+
+            # Remember where the baseline model has been saved.
+            self.config.paths.FILEPATH_MODEL = get_artifact_path(
+                'models/rnn.params')
+            with open(get_artifact_path('config.txt'), 'w') as f:
+                f.write(self.config.dump())
+
+            # Return here if all we want is the baseline model.
+            if self.config.perturbation.SKIP_PERTURBATION:
+                mlflow.end_run()
+                continue
+
+            # Get perturbation configuration.
+            perturbations = dict(self.config.perturbation.PERTURBATIONS)
+            dropout_probabilities = \
+                self.config.perturbation.DROPOUT_PROBABILITIES
+
+            # Sweep over perturbation types and levels, degrees of controllabi-
+            # lity and observability, and repeat for multiple random seeds.
+            run_name = 'Perturbation type'
+            for perturbation_type in tqdm(perturbations.keys(), run_name,
+                                          leave=False):
+                conditions['tags.mlflow.runName'] = run_name
+                conditions['params.perturbation_type'] = perturbation_type
+                run_id = self.get_run_id(conditions)
+                if resume_experiment and run_id is None:
+                    continue
+                mlflow.start_run(run_id, run_name=run_name, tags=tags,
+                                 nested=True)
+                run_name = 'Perturbation level'
+                levels = perturbations[perturbation_type]
+                for perturbation_level in tqdm(levels, run_name, leave=False):
+                    conditions['tags.mlflow.runName'] = run_name
+                    conditions['params.perturbation_level'] = \
+                        str(perturbation_level)
+                    run_id = self.get_run_id(conditions)
+                    if resume_experiment and run_id is None:
+                        continue
+                    mlflow.start_run(run_id, run_name=run_name, tags=tags,
+                                     nested=True)
+                    run_name = 'Dropout probability'
+                    for dropout_probability in tqdm(dropout_probabilities,
+                                                    run_name, leave=False):
+                        conditions['tags.mlflow.runName'] = run_name
+                        conditions['params.dropout_probability'] = \
+                            str(dropout_probability)
+                        run_id = self.get_run_id(conditions)
+                        if resume_experiment and run_id is None:
+                            continue
+                        mlflow.start_run(run_id, run_name=run_name, tags=tags,
+                                         nested=True)
+                        mlflow.log_params({
+                            'seed': seed,
+                            'perturbation_type': perturbation_type,
+                            'perturbation_level': perturbation_level,
+                            'dropout_probability': dropout_probability})
+                        self.train(perturbation_type, perturbation_level,
+                                   dropout_probability, **self.data_dict)
                         mlflow.end_run()
                     mlflow.end_run()
                 mlflow.end_run()
             mlflow.end_run()
-        pd.DataFrame(dfs).to_pickle(get_artifact_path('output.pkl'))
         mlflow.end_run()
 
 
@@ -311,16 +391,21 @@ class LqrPipeline(NeuralPerturbationPipeline):
         # Create model consisting of neural system, controller and environment.
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
         if is_perturbed:
+            freeze_neuralsystem = True
+            freeze_controller = False
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_neuralsystem=True, freeze_controller=False,
-                environment=environment, load_weights_from=path_model)
+                freeze_neuralsystem, freeze_controller, environment,
+                load_weights_from=path_model)
+            num_epochs = self.config.training.NUM_EPOCHS_CONTROLLER
         else:
+            freeze_neuralsystem = False
+            freeze_controller = True
             self.model = self.get_model(
-                freeze_neuralsystem=False, freeze_controller=True,
-                environment=environment)
+                freeze_neuralsystem, freeze_controller, environment)
+            num_epochs = self.config.training.NUM_EPOCHS_NEURALSYSTEM
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
@@ -334,9 +419,9 @@ class LqrPipeline(NeuralPerturbationPipeline):
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
-        test_loss = self.evaluate(data_train)
-        mlflow.log_metric('training_loss', test_loss, -1)
-        test_loss = self.evaluate(data_test, 'trajectory_-1.png')
+        training_loss = self.evaluate(data_train, environment)
+        mlflow.log_metric('training_loss', training_loss, -1)
+        test_loss = self.evaluate(data_test, environment, 'trajectory_-1.png')
         mlflow.log_metric('test_loss', test_loss, -1)
 
         # Initialize controller weights.
@@ -358,10 +443,13 @@ class LqrPipeline(NeuralPerturbationPipeline):
         masker = Masker(self.model, dropout_probability, rng)
         masker.apply_mask()
 
+        # Store the hash values of model weights so we can check later that
+        # only the parts were trained that we wanted.
+        self.model.cache_weight_hash()
+
         # Train neural system (if unperturbed) or controller (if perturbed).
         logging.info("Training...")
-        training_loss = test_loss = None
-        for epoch in trange(self.config.training.NUM_EPOCHS, desc='epoch'):
+        for epoch in trange(num_epochs, desc='epoch'):
             training_loss = 0
             for batch_idx, (data, label) in tenumerate(
                     data_train, desc='batch', leave=False):
@@ -372,9 +460,12 @@ class LqrPipeline(NeuralPerturbationPipeline):
                 training_loss += loss.mean().asscalar()
 
             training_loss /= len(data_train)
-            test_loss = self.evaluate(data_test, f'trajectory_{epoch}.png')
+            test_loss = self.evaluate(data_test, environment,
+                                      f'trajectory_{epoch}.png')
             mlflow.log_metric('training_loss', training_loss, epoch)
             mlflow.log_metric('test_loss', test_loss, epoch)
+
+        self.model.assert_plasticity(freeze_neuralsystem, freeze_controller)
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
@@ -383,32 +474,29 @@ class LqrPipeline(NeuralPerturbationPipeline):
             logging.info(f"Saved model to {path_model}.")
 
         # Compute controllability and observability Gramians.
-        if is_perturbed:
-            logging.info("Computing Gramians...")
-            gramians = Gramians(self.model, environment, self.device, dt, T)
-            g_c = gramians.compute_controllability()
-            g_o = gramians.compute_observability()
-            g_c_eig = np.linalg.eig(g_c)
-            g_o_eig = np.linalg.eig(g_o)
-            # Use product of eigenvalue spectrum as scalar matric for
-            # controllability and observability. The larger the better.
-            controllability = np.prod(g_c_eig[0]).item()
-            observability = np.prod(g_o_eig[0]).item()
-            mlflow.log_metrics({'controllability': controllability,
-                                'observability': observability})
-        else:
-            g_c = g_o = None
+        logging.info("Computing Gramians...")
+        gramians = Gramians(self.model, environment, self.device, dt, T)
+        g_c = gramians.compute_controllability()
+        g_o = gramians.compute_observability()
 
-        return {'training_loss': training_loss, 'test_loss': test_loss,
-                'controllability': g_c, 'observability': g_o}
+        np.savez_compressed(get_artifact_path('gramians.npz'),
+                            controllability_gramian=g_c,
+                            observability_gramian=g_o)
+        mlflow.log_metrics({'controllability': masker.controllability,
+                            'observability': masker.observability})
 
     def evaluate(self, data_loader: DataLoader,
+                 environment: Optional[StochasticLinearIOSystem] = None,
                  filename: Optional[str] = None) -> float:
         """
         Evaluate model.
 
         Parameters
         ----------
+        environment
+            The environment with which the neural system interacts. Can be None
+            if we evaluate only on pre-recorded trajectories from
+            `data_loader`.
         data_loader
             Data loaders for train and test set. Contain trajectories in state
             space to provide initial values or learning signal.
@@ -439,7 +527,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
                                      ylim=[-1, 1], line_label='RNN')
             fig = plot_phase_diagram({'x': data[:, 0, 0].asnumpy(),
                                       'v': data[:, 0, 1].asnumpy()},
-                                     show=False, fig=fig, line_label='LQG')
+                                     show=False, fig=fig, line_label='LQR')
             fig.legend()
             mlflow.log_figure(fig, os.path.join('figures', filename))
         return validation_loss / len(data_loader)
