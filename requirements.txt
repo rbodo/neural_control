@@ -4,7 +4,6 @@ pandas
 seaborn
 matplotlib
 gym[mujuco]
-mujoco
 torch
 control
 yacs
@@ -17,3 +16,4 @@ optuna
 plotly
 mxnet
 stable-baselines3[extra]
+sb3_contrib
