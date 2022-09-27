@@ -7,8 +7,9 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 6
+    config.GPU = 4
     config.EXPERIMENT_NAME = 'linear_rnn_lqr'
+    # config.RESUME_EXPERIMENT = '2022-09-21_17:29:07'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)

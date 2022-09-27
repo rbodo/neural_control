@@ -150,9 +150,8 @@ def run_single(env: Union[DiGym, POMDP],
     states = []
     rewards = []
     while True:
-        u, lstm_states = model.predict(y, state=lstm_states,
-                                       episode_start=episode_starts,
-                                       deterministic=deterministic)
+        u, lstm_states = model.predict(y, lstm_states, episode_starts,
+                                       deterministic)
         states.append(x)
         if monitor is not None:
             monitor.update_variables(t, states=x, outputs=y, control=u,

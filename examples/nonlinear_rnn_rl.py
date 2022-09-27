@@ -6,14 +6,14 @@ from typing import Optional, Tuple
 import gym
 import mlflow
 import numpy as np
+import matplotlib
 from matplotlib import pyplot as plt
 
 from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline, run_single, POMDP, run_n
 from src.plotting import plot_phase_diagram
 
-os.environ['LD_LIBRARY_PATH'] += \
-        ':/usr/lib/nvidia:' + os.path.expanduser('~/.mujoco/mujoco210/bin')
+matplotlib.use('Agg')
 
 
 class NonlinearRlPipeline(LinearRlPipeline):
