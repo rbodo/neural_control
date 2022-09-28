@@ -69,6 +69,7 @@ class NeuralPerturbationPipeline(ABC):
         self.device = None
         self.model = None
         self._runs = None  # Previous runs to resume.
+        self._COMPLETED_RUN_ID = '-1'
 
     @abstractmethod
     def get_environment(self, num_inputs: int, num_states: int,
@@ -150,7 +151,10 @@ class NeuralPerturbationPipeline(ABC):
         Returns
         -------
         run_id
-            ID of run that meets conditions and is unfinished. None otherwise.
+            If there exists a run that meets `conditions` and is unfinished,
+            return its ID. If it exists but is completed, return a flag that
+            tells the downstream program to skip this configuration. If no run
+            could be found, return None, which starts a new run.
         """
 
         resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
@@ -177,6 +181,10 @@ class NeuralPerturbationPipeline(ABC):
                 logging.info(f"Resuming unfinished run {run_id} "
                              f"with conditions {conditions}.")
                 return run_id
+            return self._COMPLETED_RUN_ID
+
+    def _is_run_completed(self, run_id: str):
+        return run_id == self._COMPLETED_RUN_ID
 
     def main(self):
         """Run the pipeline.
@@ -203,6 +211,8 @@ class NeuralPerturbationPipeline(ABC):
         run_name = 'Main'
         conditions = {'tags.mlflow.runName': run_name}
         run_id = self.get_run_id(conditions)
+        if self._is_run_completed(run_id):
+            return
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
         parser = argparse.ArgumentParser()
@@ -223,7 +233,7 @@ class NeuralPerturbationPipeline(ABC):
         conditions['tags.mlflow.runName'] = run_name
         conditions['params.seed'] = str(seed)
         run_id = self.get_run_id(conditions)
-        if resume_experiment and run_id is None:
+        if self._is_run_completed(run_id):
             return
         mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
 
@@ -262,7 +272,7 @@ class NeuralPerturbationPipeline(ABC):
             conditions['tags.mlflow.runName'] = run_name
             conditions['params.perturbation_type'] = perturbation_type
             run_id = self.get_run_id(conditions)
-            if resume_experiment and run_id is None:
+            if self._is_run_completed(run_id):
                 continue
             mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
             run_name = 'Perturbation level'
@@ -272,7 +282,7 @@ class NeuralPerturbationPipeline(ABC):
                 conditions['params.perturbation_level'] = \
                     str(perturbation_level)
                 run_id = self.get_run_id(conditions)
-                if resume_experiment and run_id is None:
+                if self._is_run_completed(run_id):
                     continue
                 mlflow.start_run(run_id, run_name=run_name, tags=tags,
                                  nested=True)
@@ -283,7 +293,7 @@ class NeuralPerturbationPipeline(ABC):
                     conditions['params.dropout_probability'] = \
                         str(dropout_probability)
                     run_id = self.get_run_id(conditions)
-                    if resume_experiment and run_id is None:
+                    if self._is_run_completed(run_id):
                         continue
                     mlflow.start_run(run_id, run_name=run_name, tags=tags,
                                      nested=True)
