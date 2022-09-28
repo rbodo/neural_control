@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import sys
@@ -197,90 +198,97 @@ class NeuralPerturbationPipeline(ABC):
         run_name = 'Main'
         conditions = {'tags.mlflow.runName': run_name}
         run_id = self.get_run_id(conditions)
-        if resume_experiment and run_id is None:
-            return
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
+        parser = argparse.ArgumentParser()
+        parser.add_argument('seed_id', type=int)
+        seed_id = parser.parse_args().seed_id
+        if seed_id is None:
+            for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
+                self._main(seed, resume_experiment, conditions, tags)
+        else:
+            logging.info("Using seed from command line.")
+            seed = self.config.SEEDS[seed_id]
+            self._main(seed, resume_experiment, conditions, tags)
+        mlflow.end_run()
+
+    def _main(self, seed, resume_experiment, conditions, tags):
         run_name = 'seed'
-        for seed in tqdm(self.config.SEEDS, run_name, leave=False):
-            self.config.SEED = seed
+        self.config.SEED = seed
+        conditions['tags.mlflow.runName'] = run_name
+        conditions['params.seed'] = str(seed)
+        run_id = self.get_run_id(conditions)
+        if resume_experiment and run_id is None:
+            return
+        mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
+
+        # Train unperturbed and uncontrolled baseline model (i.e. neural
+        # system controlling the double integrator environment).
+        perturbation_type = ''
+        perturbation_level = 0
+        dropout_probability = 0
+        mlflow.log_params({'seed': seed,
+                           'perturbation_type': perturbation_type,
+                           'perturbation_level': perturbation_level,
+                           'dropout_probability': dropout_probability})
+        self.train(perturbation_type, perturbation_level, dropout_probability,
+                   **self.data_dict)
+
+        # Remember where the baseline model has been saved.
+        self.config.paths.FILEPATH_MODEL = get_artifact_path(
+            'models/rnn.params')
+        with open(get_artifact_path('config.txt'), 'w') as f:
+            f.write(self.config.dump())
+
+        # Return here if all we want is the baseline model.
+        if self.config.perturbation.SKIP_PERTURBATION:
+            mlflow.end_run()
+            return
+
+        # Get perturbation configuration.
+        perturbations = dict(self.config.perturbation.PERTURBATIONS)
+        dropout_probabilities = self.config.perturbation.DROPOUT_PROBABILITIES
+
+        # Sweep over perturbation types and levels, degrees of controllability
+        # and observability, and repeat for multiple random seeds.
+        run_name = 'Perturbation type'
+        for perturbation_type in tqdm(perturbations.keys(), run_name,
+                                      leave=False):
             conditions['tags.mlflow.runName'] = run_name
-            conditions['params.seed'] = str(seed)
+            conditions['params.perturbation_type'] = perturbation_type
             run_id = self.get_run_id(conditions)
             if resume_experiment and run_id is None:
                 continue
             mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
-
-            # Train unperturbed and uncontrolled baseline model (i.e. neural
-            # system controlling the double integrator environment).
-            perturbation_type = ''
-            perturbation_level = 0
-            dropout_probability = 0
-            mlflow.log_params({'seed': seed,
-                               'perturbation_type': perturbation_type,
-                               'perturbation_level': perturbation_level,
-                               'dropout_probability': dropout_probability})
-            self.train(perturbation_type, perturbation_level,
-                       dropout_probability, **self.data_dict)
-
-            # Remember where the baseline model has been saved.
-            self.config.paths.FILEPATH_MODEL = get_artifact_path(
-                'models/rnn.params')
-            with open(get_artifact_path('config.txt'), 'w') as f:
-                f.write(self.config.dump())
-
-            # Return here if all we want is the baseline model.
-            if self.config.perturbation.SKIP_PERTURBATION:
-                mlflow.end_run()
-                continue
-
-            # Get perturbation configuration.
-            perturbations = dict(self.config.perturbation.PERTURBATIONS)
-            dropout_probabilities = \
-                self.config.perturbation.DROPOUT_PROBABILITIES
-
-            # Sweep over perturbation types and levels, degrees of controllabi-
-            # lity and observability, and repeat for multiple random seeds.
-            run_name = 'Perturbation type'
-            for perturbation_type in tqdm(perturbations.keys(), run_name,
-                                          leave=False):
+            run_name = 'Perturbation level'
+            levels = perturbations[perturbation_type]
+            for perturbation_level in tqdm(levels, run_name, leave=False):
                 conditions['tags.mlflow.runName'] = run_name
-                conditions['params.perturbation_type'] = perturbation_type
+                conditions['params.perturbation_level'] = \
+                    str(perturbation_level)
                 run_id = self.get_run_id(conditions)
                 if resume_experiment and run_id is None:
                     continue
                 mlflow.start_run(run_id, run_name=run_name, tags=tags,
                                  nested=True)
-                run_name = 'Perturbation level'
-                levels = perturbations[perturbation_type]
-                for perturbation_level in tqdm(levels, run_name, leave=False):
+                run_name = 'Dropout probability'
+                for dropout_probability in tqdm(dropout_probabilities,
+                                                run_name, leave=False):
                     conditions['tags.mlflow.runName'] = run_name
-                    conditions['params.perturbation_level'] = \
-                        str(perturbation_level)
+                    conditions['params.dropout_probability'] = \
+                        str(dropout_probability)
                     run_id = self.get_run_id(conditions)
                     if resume_experiment and run_id is None:
                         continue
                     mlflow.start_run(run_id, run_name=run_name, tags=tags,
                                      nested=True)
-                    run_name = 'Dropout probability'
-                    for dropout_probability in tqdm(dropout_probabilities,
-                                                    run_name, leave=False):
-                        conditions['tags.mlflow.runName'] = run_name
-                        conditions['params.dropout_probability'] = \
-                            str(dropout_probability)
-                        run_id = self.get_run_id(conditions)
-                        if resume_experiment and run_id is None:
-                            continue
-                        mlflow.start_run(run_id, run_name=run_name, tags=tags,
-                                         nested=True)
-                        mlflow.log_params({
-                            'seed': seed,
-                            'perturbation_type': perturbation_type,
-                            'perturbation_level': perturbation_level,
-                            'dropout_probability': dropout_probability})
-                        self.train(perturbation_type, perturbation_level,
-                                   dropout_probability, **self.data_dict)
-                        mlflow.end_run()
+                    mlflow.log_params({
+                        'seed': seed,
+                        'perturbation_type': perturbation_type,
+                        'perturbation_level': perturbation_level,
+                        'dropout_probability': dropout_probability})
+                    self.train(perturbation_type, perturbation_level,
+                               dropout_probability, **self.data_dict)
                     mlflow.end_run()
                 mlflow.end_run()
             mlflow.end_run()
