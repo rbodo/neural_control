@@ -160,11 +160,16 @@ class NeuralPerturbationPipeline(ABC):
             self._runs = mlflow.search_runs(
                 experiment_names=[self.config.EXPERIMENT_NAME],
                 filter_string=f'tags.main_start_time = "{resume_experiment}"')
-        mask = np.prod([self._runs[key] == value
-                        for key, value in conditions.items()], 0)
+        try:
+            mask = np.prod([self._runs[key] == value
+                            for key, value in conditions.items()], 0)
+        except KeyError:
+            logging.debug("Could not find run that matches conditions "
+                          f"{conditions}.")
+            return
         idx = self._runs.loc[mask.astype(bool)].index
         if len(idx) > 1:
-            raise AssertionError("Couldn't find unique run to resume.")
+            raise AssertionError("Could not find unique run to resume.")
         if len(idx) == 1:
             idx = idx[0]
             if self._runs['status'][idx] in ['UNFINISHED', 'RUNNING']:
