@@ -153,7 +153,7 @@ class StochasticLinearIOSystem(nn.Module):
         return y + self.get_additive_white_gaussian_noise(self.num_outputs,
                                                           torch.diag(self.V))
 
-    def get_additive_white_gaussian_noise(self, n: int, scale: float
+    def get_additive_white_gaussian_noise(self, n: int, scale: torch.Tensor
                                           ) -> torch.Tensor:
         return torch.normal(torch.zeros(n, **self.tkwargs), scale)
 
@@ -193,6 +193,7 @@ class MLP:
                  path_model=None):
 
         self.process = process
+        self.dt = self.process.dt.data.numpy()
         self.tkwargs = self.process.tkwargs
         dtype = np.dtype(str(self.process.dtype).split('.')[1])
 
@@ -210,7 +211,7 @@ class MLP:
 
     def get_cost(self, x: torch.Tensor, u: torch.Tensor) -> float:
         return get_lqr_cost(asnumpy(x), asnumpy(u), self.Q, self.R,
-                            self.process.dt)
+                            self.dt)
 
     def get_control(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
@@ -498,6 +499,9 @@ def get_device(config: CfgNode) -> torch.device:
     """Return hardware backend to run on."""
 
     gpu = str(config.GPU)
+    if gpu == 'cuda':  # Leave device ID unspecified.
+        return torch.device(gpu)
+    # Otherwise expect integer or ''.
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu
     # Always set GPU ID to 0 here because we allow only one visible device in
     # the environment variable.

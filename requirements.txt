@@ -16,4 +16,4 @@ optuna
 plotly
 mxnet
 stable-baselines3[extra]
-sb3_contrib
+sb3-contrib
