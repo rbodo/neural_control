@@ -216,18 +216,18 @@ class NeuralPerturbationPipeline(ABC):
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('-s', '--seed_id', type=int, required=False)
-        seed_id = parser.parse_args().seed_id
-        if seed_id is None:
+        parser.add_argument('-s', '--experiment_id', type=int, required=False)
+        experiment_id = parser.parse_args().experiment_id
+        if experiment_id is None:
             for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
-                self._main(seed, resume_experiment, conditions, tags)
+                self._main(seed, conditions, tags)
         else:
             logging.info("Using seed from command line.")
-            seed = self.config.SEEDS[seed_id]
-            self._main(seed, resume_experiment, conditions, tags)
+            seed = self.config.SEEDS[experiment_id]
+            self._main(seed, conditions, tags)
         mlflow.end_run()
 
-    def _main(self, seed, resume_experiment, conditions, tags):
+    def _main(self, seed, conditions, tags):
         run_name = 'seed'
         self.config.SEED = seed
         conditions['tags.mlflow.runName'] = run_name
