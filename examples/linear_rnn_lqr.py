@@ -201,7 +201,7 @@ class NeuralPerturbationPipeline(ABC):
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('seed_id', type=int)
+        parser.add_argument('seed_id', type=int, required=False)
         seed_id = parser.parse_args().seed_id
         if seed_id is None:
             for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
