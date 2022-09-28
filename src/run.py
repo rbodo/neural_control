@@ -13,7 +13,7 @@ os.environ['MLFLOW_TRACKING_URI'] = 'file:' + os.path.expanduser(
 mlflow.run('https://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@github.com/rbodo/'
            'neural_control.git',
            entry_point=f'examples/{label}.py',
-           version='rnn_controller',  # branch
+           version='debug_snellius',  # branch
            experiment_name=label,
            env_manager='local')
 
