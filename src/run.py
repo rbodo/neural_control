@@ -15,6 +15,7 @@ mlflow.run('https://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@github.com/rbodo/'
            entry_point=f'examples/{label}.py',
            version='debug_snellius',  # branch
            experiment_name=label,
+           run_name='Main',
            env_manager='local')
 
 sys.exit()
