@@ -12,14 +12,13 @@ os.environ['MLFLOW_TRACKING_URI'] = 'file:' + os.path.expanduser(
     f'~/Data/neural_control/{label}/mlruns')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--experiment_id', type=int, required=False)
-experiment_id = parser.parse_args().experiment_id
+parser.add_argument('--sweep_id', type=int, required=False)
+sweep_id = parser.parse_args().sweep_id
 
 mlflow.run('https://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@github.com/rbodo/'
            'neural_control.git',
-           # experiment_id=experiment_id,
            entry_point=f'examples/{label}.py',
-           parameters={'experiment_id': experiment_id},
+           parameters={'sweep_id': sweep_id},
            version='debug_snellius',  # branch
            experiment_name=label,
            run_name='Main',
