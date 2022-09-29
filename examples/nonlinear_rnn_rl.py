@@ -64,9 +64,7 @@ class NonlinearRlPipeline(LinearRlPipeline):
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
         rng = kwargs.get('rng', None)
-        logging.info('1')
-        environment = gym.make('InvertedPendulum-v2')
-        logging.info('2')
+        environment = gym.make('InvertedPendulum-v4')
         environment = POMDP(environment, observation_noise, rng,
                             observation_indices, dt)
         return environment
