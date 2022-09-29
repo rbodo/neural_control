@@ -9,7 +9,7 @@ def get_config():
 
     config.GPU = 'cuda'
     config.EXPERIMENT_NAME = 'nonlinear_rnn_rl'
-    # config.RESUME_EXPERIMENT = 'Debug_2022-09-28'
+    config.RESUME_EXPERIMENT = '2022-09-29'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
