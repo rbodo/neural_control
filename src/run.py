@@ -4,7 +4,7 @@ import sys
 
 import mlflow
 
-label = 'nonlinear_rnn_rl'
+label = 'linear_rnn_rl'
 
 # Needs to be set before executing run function.
 # https://github.com/mlflow/mlflow/issues/608
