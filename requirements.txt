@@ -3,7 +3,7 @@ numpy
 pandas
 seaborn
 matplotlib
-gym[mujuco]
+gym[mujuco]==0.21
 torch
 control
 yacs

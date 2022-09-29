@@ -9,7 +9,9 @@ For basic functionality:
 pip install -r requirements.txt
 ```
 To use nonlinear MUJOCO systems such as the inverted pendulum, follow the 
-respective instructions here: https://www.gymlibrary.dev/environments/mujoco/
+respective instructions here: https://www.gymlibrary.dev/environments/mujoco/. 
+Note: Gym requires the old mujoco 1.5.0 version for its python bindings 
+(download here: https://www.roboti.us/download.html).
 
 ## Contents
 
