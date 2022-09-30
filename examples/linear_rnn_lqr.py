@@ -202,22 +202,24 @@ class NeuralPerturbationPipeline(ABC):
 
         # We use the mlflow package for tracking experiment results.
         resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
-        tags = {'main_start_time': resume_experiment
-                or time.strftime('%Y-%m-%d_%H:%M:%S')}
+        tags = {'main_start_time':
+                resume_experiment or time.strftime('%Y-%m-%d_%H:%M:%S')}
         mlflow.set_tracking_uri(os.path.join(
             'file:' + self.config.paths.BASE_PATH, 'mlruns'))
         mlflow.set_experiment(self.config.EXPERIMENT_NAME)
 
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--sweep_id', type=int, required=False, default=-1)
+        sweep_id = parser.parse_args().sweep_id
+
         run_name = 'Main'
-        conditions = {'tags.mlflow.runName': run_name}
+        conditions = {'tags.mlflow.runName': run_name,
+                      'params.sweep_id': sweep_id}
         run_id = self.get_run_id(conditions)
         if self._is_run_completed(run_id):
             return
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--sweep_id', type=int, required=False, default=-1)
-        sweep_id = parser.parse_args().sweep_id
         if sweep_id < 0:
             for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
                 self._main(seed, conditions, tags)
