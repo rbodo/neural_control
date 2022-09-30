@@ -228,14 +228,13 @@ class NeuralPerturbationPipeline(ABC):
         mlflow.end_run()
 
     def _main(self, seed, conditions, tags):
-        run_name = 'seed'
         self.config.SEED = seed
-        conditions['tags.mlflow.runName'] = run_name
+        conditions['tags.mlflow.runName'] = 'seed'
         conditions['params.seed'] = str(seed)
         run_id = self.get_run_id(conditions)
         if self._is_run_completed(run_id):
             return
-        mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
+        mlflow.start_run(run_id, run_name='seed', tags=tags, nested=True)
 
         # Train unperturbed and uncontrolled baseline model (i.e. neural
         # system controlling the double integrator environment).
@@ -266,37 +265,37 @@ class NeuralPerturbationPipeline(ABC):
 
         # Sweep over perturbation types and levels, degrees of controllability
         # and observability, and repeat for multiple random seeds.
-        run_name = 'Perturbation type'
-        for perturbation_type in tqdm(perturbations.keys(), run_name,
-                                      leave=False):
-            conditions['tags.mlflow.runName'] = run_name
+        for perturbation_type in tqdm(perturbations.keys(),
+                                      'Perturbation type', leave=False):
+            conditions['tags.mlflow.runName'] = 'Perturbation type'
             conditions['params.perturbation_type'] = perturbation_type
             run_id = self.get_run_id(conditions)
             if self._is_run_completed(run_id):
                 continue
-            mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
-            run_name = 'Perturbation level'
+            mlflow.start_run(run_id, run_name='Perturbation type', tags=tags,
+                             nested=True)
             levels = perturbations[perturbation_type]
-            for perturbation_level in tqdm(levels, run_name, leave=False):
-                conditions['tags.mlflow.runName'] = run_name
+            for perturbation_level in tqdm(levels, 'Perturbation level',
+                                           leave=False):
+                conditions['tags.mlflow.runName'] = 'Perturbation level'
                 conditions['params.perturbation_level'] = \
                     str(perturbation_level)
                 run_id = self.get_run_id(conditions)
                 if self._is_run_completed(run_id):
                     continue
-                mlflow.start_run(run_id, run_name=run_name, tags=tags,
-                                 nested=True)
-                run_name = 'Dropout probability'
+                mlflow.start_run(run_id, run_name='Perturbation level',
+                                 tags=tags, nested=True)
                 for dropout_probability in tqdm(dropout_probabilities,
-                                                run_name, leave=False):
-                    conditions['tags.mlflow.runName'] = run_name
+                                                'Dropout probability',
+                                                leave=False):
+                    conditions['tags.mlflow.runName'] = 'Dropout probability'
                     conditions['params.dropout_probability'] = \
                         str(dropout_probability)
                     run_id = self.get_run_id(conditions)
                     if self._is_run_completed(run_id):
                         continue
-                    mlflow.start_run(run_id, run_name=run_name, tags=tags,
-                                     nested=True)
+                    mlflow.start_run(run_id, run_name='Dropout probability',
+                                     tags=tags, nested=True)
                     mlflow.log_params({
                         'seed': seed,
                         'perturbation_type': perturbation_type,
