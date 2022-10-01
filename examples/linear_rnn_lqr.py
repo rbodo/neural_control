@@ -4,7 +4,7 @@ import os
 import sys
 from abc import ABC, abstractmethod
 import time
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, Tuple
 
 import gym
 import mlflow
@@ -68,8 +68,9 @@ class NeuralPerturbationPipeline(ABC):
         self.data_dict = data_dict or {}
         self.device = None
         self.model = None
+        self._resume_experiment = None
         self._runs = None  # Previous runs to resume.
-        self._COMPLETED_RUN_ID = '-1'
+        self.argparser = None
 
     @abstractmethod
     def get_environment(self, num_inputs: int, num_states: int,
@@ -139,7 +140,7 @@ class NeuralPerturbationPipeline(ABC):
         """Get hardware backend to run on."""
         raise NotImplementedError
 
-    def get_run_id(self, conditions: dict) -> Union[str, None]:
+    def get_run_id(self, conditions: dict) -> Union[Tuple[str, bool], None]:
         """Get id of run that meets `conditions` and is unfinished.
 
         Parameters
@@ -150,41 +151,57 @@ class NeuralPerturbationPipeline(ABC):
 
         Returns
         -------
-        run_id
-            If there exists a run that meets `conditions` and is unfinished,
-            return its ID. If it exists but is completed, return a flag that
-            tells the downstream program to skip this configuration. If no run
-            could be found, return None, which starts a new run.
+        run_id, is_done
+            If there exists a run that meets `conditions`, return its ID
+            together with a flag that tells whether the run is completed.
+            If no run could be found, return an empty string, which starts a
+            new run.
         """
 
-        resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
-        if not resume_experiment:
-            return
+        run_id = ''
+        is_done = False
         if self._runs is None:
             self._runs = mlflow.search_runs(
                 experiment_names=[self.config.EXPERIMENT_NAME],
-                filter_string=f'tags.main_start_time = "{resume_experiment}"')
+                filter_string='tags.resume_experiment = ' +
+                              f'"{self._resume_experiment}"')
         try:
             mask = np.prod([self._runs[key].astype(str) == str(value)
                             for key, value in conditions.items()], 0)
         except KeyError:
             logging.info("Could not find run that matches conditions "
                          f"{conditions}.")
-            return
+            return run_id, is_done
         idx = self._runs.loc[mask.astype(bool)].index
         if len(idx) > 1:
             raise AssertionError("Could not find unique run to resume.")
         if len(idx) == 1:
             idx = idx[0]
-            if self._runs['status'][idx] in ['UNFINISHED', 'RUNNING']:
-                run_id = self._runs['run_id'][idx]
+            run_id = self._runs['run_id'][idx]
+            is_done = run_id in ['UNFINISHED', 'RUNNING']
+            if not is_done:
                 logging.info(f"Resuming unfinished run {run_id} "
                              f"with conditions {conditions}.")
-                return run_id
-            return self._COMPLETED_RUN_ID
+        return run_id, is_done
 
-    def _is_run_completed(self, run_id: str):
-        return run_id == self._COMPLETED_RUN_ID
+    def set_resume_experiment(self):
+        """Decide whether to resume a previous run."""
+        from_args = self.argparser.parse_args().resume_experiment
+        from_config = self.config.get('RESUME_EXPERIMENT', '')
+        if from_args:  # Command line argument takes precedence over config.
+            self._resume_experiment = from_args
+        elif from_config:
+            self._resume_experiment = from_config
+        else:
+            self._resume_experiment = time.strftime('%Y-%m-%d_%H:%M:%S')
+        self.config.RESUME_EXPERIMENT = self._resume_experiment
+
+    def set_argparser(self):
+        self.argparser = argparse.ArgumentParser()
+        self.argparser.add_argument('--sweep_id', type=int, required=False,
+                                    default=-1)
+        self.argparser.add_argument('--resume_experiment', type=str,
+                                    required=False, default='')
 
     def main(self):
         """Run the pipeline.
@@ -200,52 +217,50 @@ class NeuralPerturbationPipeline(ABC):
         # Select hardware backend.
         self.device = self.get_device()
 
+        self.set_argparser()
+        sweep_id = self.argparser.parse_args().sweep_id
+        self.set_resume_experiment()
+
         # We use the mlflow package for tracking experiment results.
-        resume_experiment = self.config.get('RESUME_EXPERIMENT', None)
-        tags = {'main_start_time':
-                resume_experiment or time.strftime('%Y-%m-%d_%H:%M:%S')}
         mlflow.set_tracking_uri(os.path.join(
             'file:' + self.config.paths.BASE_PATH, 'mlruns'))
         mlflow.set_experiment(self.config.EXPERIMENT_NAME)
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--sweep_id', type=int, required=False, default=-1)
-        sweep_id = parser.parse_args().sweep_id
-
         run_name = 'Main'
         conditions = {'tags.mlflow.runName': run_name,
                       'params.sweep_id': sweep_id}
-        run_id = self.get_run_id(conditions)
-        if self._is_run_completed(run_id):
+        run_id, is_done = self.get_run_id(conditions)
+        if is_done:
             return
+
+        tags = {'resume_experiment': self._resume_experiment}
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
         mlflow.log_param('sweep_id', sweep_id)
-        conditions.pop('params.sweep_id')
 
         if sweep_id < 0:
             for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
-                self._main(seed, conditions, tags)
+                self._main(seed)
         else:
             logging.info("Using seed from command line.")
             seed = self.config.SEEDS[sweep_id]
-            self._main(seed, conditions, tags)
+            self._main(seed)
         mlflow.end_run()
 
-    def _main(self, seed, conditions, tags):
+    def _main(self, seed):
+        run_name = 'seed'
         self.config.SEED = seed
-        conditions['tags.mlflow.runName'] = 'seed'
-        conditions['params.seed'] = str(seed)
-        run_id = self.get_run_id(conditions)
-        if self._is_run_completed(run_id):
-            return
-        mlflow.start_run(run_id, run_name='seed', tags=tags, nested=True)
+        conditions = {'tags.mlflow.runName': run_name,
+                      'params.seed': seed}
+        run_id, is_done = self.get_run_id(conditions)
+        tags = {'resume_experiment': self._resume_experiment}
+        mlflow.start_run(run_id, run_name=run_name, tags=tags, nested=True)
 
         # Train unperturbed and uncontrolled baseline model (i.e. neural
         # system controlling the double integrator environment).
         perturbation_type = ''
         perturbation_level = 0
         dropout_probability = 0
-        mlflow.log_params({'seed': seed,
+        mlflow.log_params({run_name: seed,
                            'perturbation_type': perturbation_type,
                            'perturbation_level': perturbation_level,
                            'dropout_probability': dropout_probability})
@@ -273,8 +288,8 @@ class NeuralPerturbationPipeline(ABC):
                                       'Perturbation type', leave=False):
             conditions['tags.mlflow.runName'] = 'Perturbation type'
             conditions['params.perturbation_type'] = perturbation_type
-            run_id = self.get_run_id(conditions)
-            if self._is_run_completed(run_id):
+            run_id, is_done = self.get_run_id(conditions)
+            if is_done:
                 continue
             mlflow.start_run(run_id, run_name='Perturbation type', tags=tags,
                              nested=True)
@@ -284,8 +299,8 @@ class NeuralPerturbationPipeline(ABC):
                 conditions['tags.mlflow.runName'] = 'Perturbation level'
                 conditions['params.perturbation_level'] = \
                     str(perturbation_level)
-                run_id = self.get_run_id(conditions)
-                if self._is_run_completed(run_id):
+                run_id, is_done = self.get_run_id(conditions)
+                if is_done:
                     continue
                 mlflow.start_run(run_id, run_name='Perturbation level',
                                  tags=tags, nested=True)
@@ -295,8 +310,8 @@ class NeuralPerturbationPipeline(ABC):
                     conditions['tags.mlflow.runName'] = 'Dropout probability'
                     conditions['params.dropout_probability'] = \
                         str(dropout_probability)
-                    run_id = self.get_run_id(conditions)
-                    if self._is_run_completed(run_id):
+                    run_id, is_done = self.get_run_id(conditions)
+                    if is_done:
                         continue
                     mlflow.start_run(run_id, run_name='Dropout probability',
                                      tags=tags, nested=True)
