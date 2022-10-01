@@ -165,11 +165,11 @@ class NeuralPerturbationPipeline(ABC):
                 experiment_names=[self.config.EXPERIMENT_NAME],
                 filter_string=f'tags.main_start_time = "{resume_experiment}"')
         try:
-            mask = np.prod([self._runs[key] == value
+            mask = np.prod([self._runs[key].astype(str) == str(value)
                             for key, value in conditions.items()], 0)
         except KeyError:
-            logging.debug("Could not find run that matches conditions "
-                          f"{conditions}.")
+            logging.info("Could not find run that matches conditions "
+                         f"{conditions}.")
             return
         idx = self._runs.loc[mask.astype(bool)].index
         if len(idx) > 1:
@@ -219,6 +219,8 @@ class NeuralPerturbationPipeline(ABC):
         if self._is_run_completed(run_id):
             return
         mlflow.start_run(run_id, run_name=run_name, tags=tags)
+        mlflow.log_param('sweep_id', sweep_id)
+        conditions.pop('params.sweep_id')
 
         if sweep_id < 0:
             for seed in tqdm(self.config.SEEDS, 'seed', leave=False):
