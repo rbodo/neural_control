@@ -9,7 +9,7 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 7
+    config.GPU = 2
     config.EXPERIMENT_NAME = 'linear_rnn_lqg'
 
     base_path = os.path.join(os.path.expanduser(
@@ -41,13 +41,13 @@ def get_config():
 
     # Perturbation of neural system
     config.perturbation = CfgNode()
-    config.perturbation.SKIP_PERTURBATION = False
+    config.perturbation.SKIP_PERTURBATION = True
     config.perturbation.PERTURBATIONS = [
         ('sensor', [0.1, 0.5, 1, 2, 3]),
         ('actuator', [0.1, 0.5, 1, 2, 3]),
         ('processor', [0.1, 0.5, 1, 2, 3])]
     config.perturbation.DROPOUT_PROBABILITIES = [0]#, 0.1, 0.5, 0.7, 0.9]
 
-    config.SEEDS = [42]#, 234, 55, 2, 5632]
+    config.SEEDS = [42, 234, 55, 2, 5632]
 
     return config

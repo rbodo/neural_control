@@ -95,11 +95,11 @@ def plot_trajectories(data: pd.DataFrame, row_key: str, row_label: str,
     # Draw coordinate system as inlet in first panel.
     arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
     g.axes[0, 0].annotate(
-        'Position', xy=(0.1, 0.1), xycoords='axes fraction', xytext=(75, 0),
+        'Position', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(75, 0),
         textcoords='offset points', verticalalignment='center',
         arrowprops=arrowprops)
     g.axes[0, 0].annotate(
-        'Velocity', xy=(0.1, 0.1), xycoords='axes fraction', xytext=(0, 75),
+        'Velocity', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(0, 75),
         textcoords='offset points', horizontalalignment='center',
         arrowprops=arrowprops)
 
