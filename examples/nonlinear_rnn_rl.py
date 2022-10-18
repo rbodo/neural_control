@@ -13,6 +13,8 @@ from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline, run_single, POMDP, run_n
 from src.plotting import plot_phase_diagram
 
+os.environ['LD_LIBRARY_PATH'] += \
+        ':/usr/lib/nvidia:' + os.path.expanduser('~/.mujoco/mjpro150/bin')
 matplotlib.use('Agg')
 
 
