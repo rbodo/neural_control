@@ -48,12 +48,12 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample', path,
-                      'trajectories_unperturbed.png')
+    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample',
+                      log_path, 'trajectories_unperturbed.png')
 
     # Show loss vs epochs of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(runs, path)
-    plot_training_curve_unperturbed(training_data_unperturbed, path)
+    plot_training_curve_unperturbed(training_data_unperturbed, log_path)
 
 
 def plot_trajectories(data: pd.DataFrame, row_key: str, row_label: str,

@@ -57,13 +57,14 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed, lqr_loss = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample', path,
-                      'trajectories_unperturbed.png')
+    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample',
+                      log_path, 'trajectories_unperturbed.png')
 
     # Show loss vs epochs of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(
         runs_unperturbed, path)
-    plot_training_curve_unperturbed(training_data_unperturbed, lqr_loss, path)
+    plot_training_curve_unperturbed(training_data_unperturbed, lqr_loss,
+                                    log_path)
 
     # Show loss vs epochs of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
@@ -71,7 +72,7 @@ def main(experiment_id, experiment_name, tag_start_time):
     training_data_perturbed = get_training_data_perturbed(
         runs, perturbations, dropout_probabilities, path)
     test_loss_unperturbed = runs_unperturbed['metrics.test_loss'].mean()
-    plot_training_curves_perturbed(training_data_perturbed, path,
+    plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_loss_unperturbed)
 
     # Show example trajectories of perturbed model before and after training.
@@ -82,13 +83,14 @@ def main(experiment_id, experiment_name, tag_start_time):
     data_subsystem = trajectories_perturbed.loc[
         trajectories_perturbed['perturbation_type'] == 'sensor']
     plot_trajectories(data_subsystem, 'perturbation_level',
-                      'Perturbation level', path, 'trajectories_perturbed.png')
+                      'Perturbation level', log_path,
+                      'trajectories_perturbed.png')
 
     # Show final test loss of perturbed controlled system for varying degrees
     # of controllability and observability.
     loss_vs_dropout = get_loss_vs_dropout(runs, perturbations,
                                           training_data_perturbed)
-    plot_loss_vs_dropout(loss_vs_dropout, path, test_loss_unperturbed)
+    plot_loss_vs_dropout(loss_vs_dropout, log_path, test_loss_unperturbed)
 
 
 def plot_trajectories(data: pd.DataFrame, row_key: str, row_label: str,

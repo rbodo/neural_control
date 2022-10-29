@@ -49,14 +49,14 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample', path,
-                      'trajectories_unperturbed.png')
+    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample',
+                      log_path, 'trajectories_unperturbed.png')
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
     training_data_unperturbed = get_training_data_unperturbed(
         runs_unperturbed, path, eval_every_n)
-    plot_training_curve_unperturbed(training_data_unperturbed, path)
+    plot_training_curve_unperturbed(training_data_unperturbed, log_path)
 
     # Show metric vs times of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
@@ -64,7 +64,7 @@ def main(experiment_id, experiment_name, tag_start_time):
     training_data_perturbed = get_training_data_perturbed(
         runs, perturbations, dropout_probabilities, path, eval_every_n)
     test_metric_unperturbed = runs_unperturbed['metrics.test_reward'].mean()
-    plot_training_curves_perturbed(training_data_perturbed, path,
+    plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed)
 
     # Show example trajectories of perturbed model before and after training.
@@ -75,13 +75,15 @@ def main(experiment_id, experiment_name, tag_start_time):
     data_subsystem = trajectories_perturbed.loc[
         trajectories_perturbed['perturbation_type'] == 'sensor']
     plot_trajectories(data_subsystem, 'perturbation_level',
-                      'Perturbation level', path, 'trajectories_perturbed.png')
+                      'Perturbation level', log_path,
+                      'trajectories_perturbed.png')
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed)
-    plot_metric_vs_dropout(metric_vs_dropout, path, test_metric_unperturbed)
+    plot_metric_vs_dropout(metric_vs_dropout, log_path,
+                           test_metric_unperturbed)
 
 
 def plot_trajectories(data: pd.DataFrame, row_key: str, row_label: str,
