@@ -379,6 +379,7 @@ def add_states(data: dict, states: np.ndarray):
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'nonlinear_rnn_rl'
+    # _tag_start_time = '2022-10-01'
     _tag_start_time = '2022-09-26_17:58:31'
 
     main(_experiment_id, _experiment_name, _tag_start_time)

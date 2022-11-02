@@ -403,9 +403,9 @@ def get_model_perturbed_untrained(
 def get_runs_all(path: str, experiment_id: str, tag_start_time: str
                  ) -> pd.DataFrame:
     os.chdir(path)
-    runs = mlflow.search_runs([experiment_id],
+    runs = mlflow.search_runs([experiment_id],  # f'tags.resume_experiment'
                               f'tags.main_start_time = "{tag_start_time}"')
-    runs.dropna(inplace=True)
+    runs.dropna(inplace=True, subset=['metrics.controllability'])
     return runs
 
 
