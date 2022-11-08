@@ -22,7 +22,7 @@ mlflow.run('https://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@github.com/rbodo/'
            entry_point=f'examples/{experiment_name}.py',
            parameters={'sweep_id': args.sweep_id,
                        'resume_experiment': args.resume_experiment},
-           version='debug_snellius',  # branch
+           version='master',  # branch
            experiment_name=experiment_name,
            run_name='Main',
            env_manager='local')

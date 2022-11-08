@@ -9,7 +9,7 @@ def get_config():
 
     config.GPU = 'cuda'
     config.EXPERIMENT_NAME = 'nonlinear_rnn_rl'
-    config.RESUME_EXPERIMENT = '2022-09-29'
+    config.RESUME_EXPERIMENT = '2022-11-08'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
@@ -29,17 +29,17 @@ def get_config():
     config.training.LEARNING_RATE = 2e-4
 
     config.model.ACTIVATION = 'tanh'
-    config.model.NUM_HIDDEN_NEURALSYSTEM = 256
-    config.model.NUM_LAYERS_NEURALSYSTEM = 1
-    config.model.NUM_HIDDEN_CONTROLLER = 40
+    config.model.NUM_HIDDEN_NEURALSYSTEM = 128
+    config.model.NUM_LAYERS_NEURALSYSTEM = 2
+    config.model.NUM_HIDDEN_CONTROLLER = 64
     config.model.NUM_LAYERS_CONTROLLER = 1
 
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
     config.perturbation.PERTURBATIONS = [
         ('sensor', [0.1, 0.5, 1, 2, 3]),
-        ('actuator', [0.1, 0.5, 1, 2, 3]),
-        ('processor', [0.1, 0.5, 1, 2, 3])]
+        ('processor', [0.001, 0.005, 0.01, 0.05, 0.1]),
+        ('actuator', [0.1])]#, 0.5, 1, 2, 3])]
     config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
 
     config.SEEDS = [43, 234, 55, 2, 5632]
