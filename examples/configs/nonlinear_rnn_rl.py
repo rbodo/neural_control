@@ -44,4 +44,6 @@ def get_config():
 
     config.SEEDS = [43, 234, 55, 2, 5632]
 
+    config.COMPUTE_GRAMIANS = False
+
     return config

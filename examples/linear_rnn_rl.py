@@ -427,16 +427,17 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
             logging.info(f"Saved model to {path_model}.")
 
         # Compute controllability and observability Gramians.
-        logging.info("Computing Gramians...")
-        gramians = Gramians(controlled_neuralsystem, environment,
-                            self.model.policy.action_net, T)
-        with torch.no_grad():
-            g_c = gramians.compute_controllability()
-            g_o = gramians.compute_observability()
+        if self.config.get('COMPUTE_GRAMIANS', True):
+            logging.info("Computing Gramians...")
+            gramians = Gramians(controlled_neuralsystem, environment,
+                                self.model.policy.action_net, T)
+            with torch.no_grad():
+                g_c = gramians.compute_controllability()
+                g_o = gramians.compute_observability()
 
-        np.savez_compressed(get_artifact_path('gramians.npz'),
-                            controllability_gramian=g_c,
-                            observability_gramian=g_o)
+            np.savez_compressed(get_artifact_path('gramians.npz'),
+                                controllability_gramian=g_c,
+                                observability_gramian=g_o)
         mlflow.log_metrics({'controllability': masker.controllability,
                             'observability': masker.observability})
 

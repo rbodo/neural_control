@@ -514,15 +514,16 @@ class LqrPipeline(NeuralPerturbationPipeline):
             self.model.save_parameters(path_model)
             logging.info(f"Saved model to {path_model}.")
 
-        # Compute controllability and observability Gramians.
-        logging.info("Computing Gramians...")
-        gramians = Gramians(self.model, environment, self.device, dt, T)
-        g_c = gramians.compute_controllability()
-        g_o = gramians.compute_observability()
+        if self.config.get('COMPUTE_GRAMIANS', True):
+            # Compute controllability and observability Gramians.
+            logging.info("Computing Gramians...")
+            gramians = Gramians(self.model, environment, self.device, dt, T)
+            g_c = gramians.compute_controllability()
+            g_o = gramians.compute_observability()
 
-        np.savez_compressed(get_artifact_path('gramians.npz'),
-                            controllability_gramian=g_c,
-                            observability_gramian=g_o)
+            np.savez_compressed(get_artifact_path('gramians.npz'),
+                                controllability_gramian=g_c,
+                                observability_gramian=g_o)
         mlflow.log_metrics({'controllability': masker.controllability,
                             'observability': masker.observability})
 
