@@ -39,9 +39,10 @@ def get_config():
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
     config.perturbation.PERTURBATIONS = [
-        ('sensor', [0.5]),#, 1, 2, 4, 8]),
+        ('sensor', [0.5, 1, 2, 4, 8]),
         ('processor', [0.1, 0.2, 0.3, 0.4, 0.5]),
-        ('actuator', [0.1, 0.2, 0.3, 0.4, 0.5])]
+        ('actuator', [0.1, 0.2, 0.3, 0.4, 0.5])
+    ]
     config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
 
     config.SEEDS = [43, 234, 55, 2, 5632]
