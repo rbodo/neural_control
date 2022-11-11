@@ -9,7 +9,7 @@ def get_config():
 
     config.GPU = 'cuda'
     config.EXPERIMENT_NAME = 'nonlinear_rnn_rl'
-    config.RESUME_EXPERIMENT = '2022-11-10'
+    config.RESUME_EXPERIMENT = '2022-11-11'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
@@ -37,8 +37,8 @@ def get_config():
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
     config.perturbation.PERTURBATIONS = [
-        ('processor', [0.1, 0.2, 0.3, 0.4, 0.5]),
-        ('actuator', [0.1, 0.5, 1, 2, 3]),
+        ('processor', [0.1, 0.15, 0.2, 0.25, 0.3]),
+        ('actuator', [0.5, 1, 2, 2.5, 3]),
         ('sensor', [0.1, 0.5, 1, 2, 3]),
     ]
     config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
