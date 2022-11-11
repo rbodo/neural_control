@@ -78,6 +78,10 @@ def main(experiment_id, experiment_name, tag_start_time):
     test_metric_unperturbed = runs_unperturbed['metrics.test_loss'].mean()
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed, logy=True)
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, logy=True)
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, logy=True, kind='line')
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -153,7 +157,7 @@ def plot_training_curve_unperturbed(
 
     # Draw LQR baseline.
     if lqr_loss is not None:
-        g.refline(y=lqr_loss, color='k', linestyle=':')
+        g.refline(y=lqr_loss, color='k', linestyle=':', label='LQR')
     if logy:
         g.set(yscale='log')
     g.set_axis_labels(*axis_labels)
@@ -176,7 +180,7 @@ def plot_training_curves_perturbed(
     # Get test curves corresponding to full controllability and observability.
     data_full_control = data.loc[(data.dropout_probability == 0) &
                                  (data.phase == 'test')]
-    g = sns.relplot(data=data_full_control, x='time', style='seed',
+    g = sns.relplot(data=data_full_control, x='time',
                     y='metric', col='perturbation_type',
                     col_order=PERTURBATIONS.keys(),
                     hue='perturbation_level', kind='line', palette=PALETTE,
@@ -198,6 +202,64 @@ def plot_training_curves_perturbed(
     g.despine(left=True)
     draw_colorbar()
     path_fig = os.path.join(path, 'controller_training.png')
+    plt.savefig(path_fig, bbox_inches='tight')
+    plt.show()
+
+
+def plot_controller_effect(
+        data: pd.DataFrame, path: str, test_metric_unperturbed: float,
+        ylabel: Optional[str] = 'Loss', logy: Optional[bool] = False,
+        formatx: Optional[bool] = False, sharey: Optional[bool] = True,
+        remove_ticks: Optional[bool] = True, kind: Optional[str] = 'bar'):
+    # Get test curves corresponding to full controllability and observability.
+    data_full_control = data.loc[(data.dropout_probability == 0) &
+                                 (data.phase == 'test')]
+    # Extract first and last timestep and label it as False / True in new
+    # "trained" column.
+    t_max = data_full_control['time'].max()
+    a = data_full_control.loc[data_full_control['time'] == 0]
+    b = data_full_control.loc[data_full_control['time'] == t_max]
+    a['trained'] = 'before training'
+    b['trained'] = 'after training'
+    c = pd.concat([a, b])
+
+    if kind == 'bar':
+        g = sns.FacetGrid(data=c, hue='trained', col='perturbation_type',
+                          col_order=PERTURBATIONS.keys(), legend_out=False,
+                          palette=PALETTE, sharex=False, sharey=sharey,
+                          height=5)
+        g.map(sns.barplot, 'perturbation_level', 'metric')
+    elif kind == 'line':
+        g = sns.relplot(data=c, x='perturbation_level',
+                        y='metric', col='perturbation_type',
+                        col_order=PERTURBATIONS.keys(), style='trained',
+                        hue='trained', kind='line', palette=PALETTE,
+                        legend=True, facet_kws={'sharex': False,
+                                                'sharey': sharey})
+    else:
+        raise NotImplementedError
+
+    g.set_axis_labels('Perturbation level', ylabel)
+    if logy:
+        g.set(yscale='log')
+    if formatx:
+        for ax in g.axes.flat:
+            ax.xaxis.set_major_formatter(lambda x, p: f'{int(x / 1e3)}K')
+    for i, title in enumerate(PERTURBATIONS.values()):
+        ax = g.axes[0, i]
+        # Draw unperturbed baseline.
+        ax.hlines(test_metric_unperturbed, *ax.get_xlim(), color='k',
+                  linestyle=':', label='unperturbed')
+        ax.set_title(title)
+        if remove_ticks:
+            ax.set_xticks(np.array(ax.get_xlim()) * [1.2, 0.9])
+            ax.set_xticklabels(['low', 'high'])
+            ax.set_yticks(np.array(ax.get_ylim()) * [1.2, 0.9])
+            ax.set_yticklabels(['low', 'high'])
+    g.axes[0, 0].legend()
+    # g._legend.remove()
+    g.despine(left=True)
+    path_fig = os.path.join(path, f'controller_effect_{kind}.png')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
 
