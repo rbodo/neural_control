@@ -5,6 +5,7 @@ import mxnet as mx
 import numpy as np
 from yacs.config import CfgNode
 
+from src.control_systems import AbstractMasker
 from src.empirical_gramians import emgr
 from src import control_systems
 from src.utils import get_lqr_cost, atleast_3d
@@ -578,18 +579,12 @@ class DiLqeRnn(LqeRnn):
         super().__init__(process, q, r, path_model, model_kwargs)
 
 
-class Masker:
+class Masker(AbstractMasker):
     """Helper class to set certain rows in the readout and stimulation matrix
     of a controller to zero."""
-    def __init__(self, model: ControlledNeuralSystem, p,
-                 rng: np.random.Generator):
-        self.model = model
-        self.p = p
-        n = self.model.neuralsystem.num_hidden
-        self._controllability_mask = np.nonzero(rng.binomial(1, self.p, n))
-        self._observability_mask = np.nonzero(rng.binomial(1, self.p, n))
-        self.controllability = 1 - len(self._controllability_mask[0]) / n
-        self.observability = 1 - len(self._observability_mask[0]) / n
+    def __init__(self, model: ControlledNeuralSystem, p: float, method: str):
+        super().__init__(model, p, method)
+        self.n = self.model.neuralsystem.num_hidden
 
     def apply_mask(self):
         if self.p == 0:

@@ -38,6 +38,9 @@ def get_config() -> CfgNode:
     config.controller.cost.lqr.R = 0.5  # Scale factor for control cost
     config.controller.STATE_TARGET = [0, 0]
 
+    config.perturbation = CfgNode()
+    config.perturbation.ELECTRODE_SELECTIONS = ['random', 'gramian']
+
     config.model = CfgNode()
     config.model.USE_SINGLE_MODEL_IN_SWEEP = False  # Concerns RNN noise sweep.
 

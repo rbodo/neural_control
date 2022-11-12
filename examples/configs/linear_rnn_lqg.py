@@ -3,7 +3,6 @@ import os
 import numpy as np
 
 from examples import configs
-from yacs.config import CfgNode
 
 
 def get_config():
@@ -40,8 +39,8 @@ def get_config():
     config.model.CLOSE_ENVIRONMENT_LOOP = False  # Env is not part of graph
 
     # Perturbation of neural system
-    config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = True
+    config.perturbation.ELECTRODE_SELECTIONS = ['random']
     config.perturbation.PERTURBATIONS = [
         ('sensor', [0.1, 0.5, 1, 2, 3]),
         ('actuator', [0.1, 0.5, 1, 2, 3]),

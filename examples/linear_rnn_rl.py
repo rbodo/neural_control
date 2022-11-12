@@ -343,7 +343,7 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         return model
 
     def train(self, perturbation_type, perturbation_level, dropout_probability,
-              save_model=True, **kwargs):
+              electrode_selection, save_model=True, **kwargs):
         num_steps = self.config.simulation.NUM_STEPS
         T = self.config.simulation.T
         dt = T / num_steps
@@ -356,6 +356,27 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
         # Create environment.
         environment = self.get_environment(rng=rng)
+
+        # Compute controllability and observability Gramians. Uses a model with
+        # random electrode selection trained in the previous iteration.
+        if electrode_selection == 'gramian':
+            logging.info("Computing Gramians...")
+            gramians = Gramians(self.model.policy.lstm_actor, environment,
+                                self.model.policy.action_net, T)
+            with torch.no_grad():
+                g_c = gramians.compute_controllability()
+                g_o = gramians.compute_observability()
+            np.savez_compressed(get_artifact_path('gramians.npz'),
+                                controllability_gramian=g_c,
+                                observability_gramian=g_o)
+            # We reuse the exact number of controls and observations from the
+            # model trained with random selection.
+            masker_kwargs = dict(controllability_gramian=g_c,
+                                 observability_gramian=g_o,
+                                 num_controls=self.masker.num_controls,
+                                 num_observations=self.masker.num_observations)
+        else:
+            masker_kwargs = dict(rng=rng)
 
         # Create model consisting of neural system, controller, and RL agent.
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
@@ -403,11 +424,13 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         # Reduce controllability and observability of neural system by
         # dropping out rows from the stimulation and readout matrices of the
         # controller.
-        masker = Masker(controlled_neuralsystem, dropout_probability, rng)
-        masker.apply_mask()
+        self.masker = Masker(controlled_neuralsystem, dropout_probability,
+                             electrode_selection)
+        self.masker.compute_mask(**masker_kwargs)
+        self.masker.apply_mask()
         callbacks = [EveryNTimesteps(evaluate_every_n,
                                      self.evaluation_callback),
-                     MaskingCallback(masker)]
+                     MaskingCallback(self.masker)]
         self.evaluation_callback.reset()
 
         # Store the hash values of model weights so we can check later that
@@ -426,20 +449,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
             self.model.save(path_model)
             logging.info(f"Saved model to {path_model}.")
 
-        # Compute controllability and observability Gramians.
-        if self.config.get('COMPUTE_GRAMIANS', True):
-            logging.info("Computing Gramians...")
-            gramians = Gramians(controlled_neuralsystem, environment,
-                                self.model.policy.action_net, T)
-            with torch.no_grad():
-                g_c = gramians.compute_controllability()
-                g_o = gramians.compute_observability()
-
-            np.savez_compressed(get_artifact_path('gramians.npz'),
-                                controllability_gramian=g_c,
-                                observability_gramian=g_o)
-        mlflow.log_metrics({'controllability': masker.controllability,
-                            'observability': masker.observability})
+        mlflow.log_metrics({'controllability': self.masker.controllability,
+                            'observability': self.masker.observability})
 
 
 if __name__ == '__main__':

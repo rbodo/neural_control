@@ -1,7 +1,6 @@
 import os
 
 from examples import configs
-from yacs.config import CfgNode
 
 
 def get_config():
@@ -36,8 +35,8 @@ def get_config():
     config.model.NUM_HIDDEN_CONTROLLER = 64
     config.model.NUM_LAYERS_CONTROLLER = 1
 
-    config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
+    config.perturbation.ELECTRODE_SELECTIONS = ['random']
     config.perturbation.PERTURBATIONS = [
         ('sensor', [0.5, 1, 2, 3, 4]),
         ('processor', [0.1, 0.2, 0.3, 0.4, 0.5]),

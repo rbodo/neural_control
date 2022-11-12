@@ -97,9 +97,12 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
-                                              training_data_perturbed)
+    electrode_selections = config.perturbation.ELECTRODE_SELECTIONS
+    metric_vs_dropout = get_metric_vs_dropout(
+        runs, perturbations, electrode_selections, training_data_perturbed)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
+                           test_metric_unperturbed, logy=True)
+    plot_gramian_vs_random(metric_vs_dropout, log_path,
                            test_metric_unperturbed, logy=True)
 
 
@@ -217,8 +220,8 @@ def plot_controller_effect(
     # Extract first and last timestep and label it as False / True in new
     # "trained" column.
     t_max = data_full_control['time'].max()
-    a = data_full_control.loc[data_full_control['time'] == 0]
-    b = data_full_control.loc[data_full_control['time'] == t_max]
+    a = data_full_control.loc[data_full_control['time'] == 0].copy()
+    b = data_full_control.loc[data_full_control['time'] == t_max].copy()
     a['trained'] = 'before training'
     b['trained'] = 'after training'
     c = pd.concat([a, b])
@@ -231,11 +234,10 @@ def plot_controller_effect(
         g.map(sns.barplot, 'perturbation_level', 'metric')
     elif kind == 'line':
         g = sns.relplot(data=c, x='perturbation_level',
-                        y='metric', col='perturbation_type',
+                        y='metric', col='perturbation_type', hue='trained',
                         col_order=PERTURBATIONS.keys(), style='trained',
-                        hue='trained', kind='line', palette=PALETTE,
-                        legend=True, facet_kws={'sharex': False,
-                                                'sharey': sharey})
+                        kind='line', palette=PALETTE, legend=True,
+                        facet_kws={'sharex': False, 'sharey': sharey})
     else:
         raise NotImplementedError
 
@@ -257,9 +259,48 @@ def plot_controller_effect(
             ax.set_yticks(np.array(ax.get_ylim()) * [1.2, 0.9])
             ax.set_yticklabels(['low', 'high'])
     g.axes[0, 0].legend()
-    # g._legend.remove()
     g.despine(left=True)
     path_fig = os.path.join(path, f'controller_effect_{kind}.png')
+    plt.savefig(path_fig, bbox_inches='tight')
+    plt.show()
+
+
+def plot_gramian_vs_random(
+        data: pd.DataFrame, path: str, test_metric_unperturbed: float,
+        ylabel: Optional[str] = 'Loss', logy: Optional[bool] = False,
+        formatx: Optional[bool] = False, sharey: Optional[bool] = True,
+        remove_ticks: Optional[bool] = True,
+        metric: Optional[str] = 'test_loss'):
+    g = sns.relplot(data=data, x='gramian_value', y='metrics.' + metric,
+                    col='params.perturbation_type', row='gramian_type',
+                    kind='line', legend=True, hue='params.electrode_selection',
+                    style='params.electrode_selection', palette=PALETTE,
+                    col_order=PERTURBATIONS.keys(),
+                    facet_kws={'sharex': False, 'sharey': sharey})
+    g.set_axis_labels('', ylabel)
+    g.set_titles('')
+    if logy:
+        g.set(yscale='log')
+    if formatx:
+        for ax in g.axes.flat:
+            ax.xaxis.set_major_formatter(lambda x, p: f'{int(x / 1e3)}K')
+    for i, title in enumerate(PERTURBATIONS.values()):
+        ax = g.axes[0, i]
+        # Draw unperturbed baseline.
+        ax.hlines(test_metric_unperturbed, *ax.get_xlim(), color='k',
+                  linestyle=':', label='unperturbed')
+        ax.set_title(title)
+        g.axes[0, i].set_xlabel('# stimulation electrodes')
+        g.axes[1, i].set_xlabel('# recording electrodes')
+        if remove_ticks:
+            ax.set_xticks(np.array(ax.get_xlim()) * [1.2, 0.9])
+            ax.set_xticklabels(['low', 'high'])
+            ax.set_yticks(np.array(ax.get_ylim()) * [1.2, 0.9])
+            ax.set_yticklabels(['low', 'high'])
+    g.axes[0, 0].legend(title=None, frameon=False)
+    g.despine(left=True)
+    g.legend.remove()
+    path_fig = os.path.join(path, f'gramian_vs_random.png')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
 
@@ -273,8 +314,9 @@ def plot_metric_vs_dropout(data: pd.DataFrame, path: str,
                     row='gramian_type', col='params.perturbation_type',
                     hue='params.perturbation_level', palette=PALETTE,
                     col_order=PERTURBATIONS.keys(),
+                    style='params.electrode_selection',
                     kind='line', marker='o', markersize=10, legend=False,
-                    facet_kws={'sharex': False, 'sharey': False})
+                    facet_kws={'sharex': False, 'sharey': True})
 
     # Draw unperturbed baseline.
     g.refline(y=test_metric_unperturbed, color='k', linestyle=':')
@@ -435,37 +477,43 @@ def get_trajectories_perturbed(
 
 
 def get_metric_vs_dropout(runs: pd.DataFrame, perturbations: dict,
+                          electrode_selections: list,
                           training_data_perturbed: pd.DataFrame,
                           metric: Optional[str] = 'loss') -> pd.DataFrame:
     # Get metric of uncontrolled perturbed model before training controller.
     t = training_data_perturbed
     data = {f'metrics.test_{metric}': [], f'metrics.training_{metric}': [],
             'params.perturbation_type': [], 'params.perturbation_level': [],
-            'gramian_type': [], 'gramian_value': []}
+            'params.electrode_selection': [], 'gramian_type': [],
+            'gramian_value': []}
     for gramian_type in ['metrics.controllability', 'metrics.observability']:
         for perturbation_type in perturbations.keys():
             for perturbation_level in perturbations[perturbation_type]:
-                # r are the uncontrolled perturbed runs at begin of training.
-                r = t.loc[(t['perturbation_type'] == perturbation_type) &
-                          (t['perturbation_level'] == perturbation_level) &
-                          (t['time'] == 0) & (t['dropout_probability'] == 0)]
-                # Add training and test metric.
-                data[f'metrics.test_{metric}'] += list(
-                    r[r.phase == 'test']['metric'])
-                data[f'metrics.training_{metric}'] += list(
-                    r[r.phase == 'training']['metric'])
-                n = len(r) // 2
-                add_scalars(data, n, **{
-                    'params.perturbation_type': perturbation_type,
-                    'params.perturbation_level': str(perturbation_level),
-                    'gramian_type': gramian_type, 'gramian_value': 0})
+                for electrode_selection in electrode_selections:
+                    # r are the uncontrolled perturbed runs at training begin.
+                    r = t.loc[(t['perturbation_type'] == perturbation_type) &
+                              (t['perturbation_level'] == perturbation_level) &
+                              (t['time'] == 0) &
+                              (t['dropout_probability'] == 0)]
+                    # Add training and test metric.
+                    data[f'metrics.test_{metric}'] += list(
+                        r[r.phase == 'test']['metric'])
+                    data[f'metrics.training_{metric}'] += list(
+                        r[r.phase == 'training']['metric'])
+                    n = len(r) // 2
+                    add_scalars(data, n, **{
+                        'params.perturbation_type': perturbation_type,
+                        'params.perturbation_level': str(perturbation_level),
+                        'params.electrode_selection': electrode_selection,
+                        'gramian_type': gramian_type, 'gramian_value': 0})
     # Melt the controllability and observability columns into a "gramian_type"
     # and "gramian_value" column.
     runs = runs.melt(
         var_name='gramian_type', value_name='gramian_value',
         value_vars=['metrics.controllability', 'metrics.observability'],
         id_vars=[f'metrics.test_{metric}', f'metrics.training_{metric}',
-                 'params.perturbation_type', 'params.perturbation_level'])
+                 'params.perturbation_type', 'params.perturbation_level',
+                 'params.electrode_selection'])
     # Remove empty rows corresponding to the unperturbed baseline models.
     runs = runs.loc[runs['params.perturbation_type'] != '']
     # Concatenate training curves with baseline results.
@@ -507,7 +555,8 @@ def get_runs_all(path: str, experiment_id: str, tag_start_time: str
                  ) -> pd.DataFrame:
     os.chdir(path)
     runs = mlflow.search_runs([experiment_id],  # f'tags.resume_experiment'
-                              f'tags.main_start_time = "{tag_start_time}"')
+                              f'tags.resume_experiment = "{tag_start_time}"')
+    assert len(runs) > 0
     runs.dropna(inplace=True, subset=['metrics.controllability'])
     return runs
 
@@ -567,7 +616,7 @@ def draw_colorbar():
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'linear_rnn_lqr'
-    _tag_start_time = '2022-09-21_17:29:07'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 

@@ -1,7 +1,6 @@
 import os
 
 from examples import configs
-from yacs.config import CfgNode
 
 
 def get_config():
@@ -9,7 +8,7 @@ def get_config():
 
     config.GPU = 4
     config.EXPERIMENT_NAME = 'linear_rnn_lqr'
-    # config.RESUME_EXPERIMENT = '2022-09-21_17:29:07'
+    config.RESUME_EXPERIMENT = '2022-11-11'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
@@ -36,8 +35,8 @@ def get_config():
     config.model.NUM_LAYERS_CONTROLLER = 1
     config.model.CLOSE_ENVIRONMENT_LOOP = True  # Make env part of graph
 
-    config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
+    config.perturbation.ELECTRODE_SELECTIONS = ['random', 'gramian']
     config.perturbation.PERTURBATIONS = [
         ('sensor', [1, 2, 4, 8, 16]),
         ('actuator', [0.1, 0.5, 1, 2, 3]),

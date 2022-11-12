@@ -1,5 +1,7 @@
 import logging
 import time
+
+from abc import ABC, abstractmethod
 from typing import Union, Optional
 
 import control
@@ -403,3 +405,73 @@ class PID:
         if self.integral_windup_limit is None:
             return
         self.i = np.clip(self.i, *self.integral_windup_limit)
+
+
+def get_ev_sum(gramian: np.ndarray, threshold: Optional[float] = 0.9):
+    # Compute eigenvalues and eigenvectors of Gramian.
+    w, v = np.linalg.eigh(gramian)
+    # Sort ascending.
+    w = w[::-1]
+    v = v[:, ::-1]
+    # Determine how many eigenvectors to use.
+    fraction_explained = np.cumsum(w) / np.sum(w)
+    n = np.min(np.flatnonzero(fraction_explained > threshold))
+    # Add up eigenvectors weighted by corresponding eigenvalues.
+    weighted_sum = np.dot(v[:, :n], w[:n])
+    return weighted_sum
+
+
+class AbstractMasker(ABC):
+    """Helper class to set certain rows in the readout and stimulation matrix
+    of a controller to zero."""
+    def __init__(self, model, p: float, method: str):
+        self.model = model
+        self.p = p
+        self.method = method
+        self._controllability_mask = None
+        self._observability_mask = None
+        self.n = None
+
+    @abstractmethod
+    def apply_mask(self):
+        raise NotImplementedError
+
+    def compute_mask(self, **kwargs):
+        if self.method == 'gramian':
+            self._compute_mask_gramian(**kwargs)
+        elif self.method == 'random':
+            self._compute_mask_random(**kwargs)
+        else:
+            raise NotImplementedError
+
+    def _compute_mask_random(self, rng: np.random.Generator):
+        self._controllability_mask = \
+            np.flatnonzero(rng.binomial(1, self.p, self.n))
+        self._observability_mask = \
+            np.flatnonzero(rng.binomial(1, self.p, self.n))
+
+    def _compute_mask_gramian(self, controllability_gramian: np.ndarray,
+                              observability_gramian: np.ndarray,
+                              num_controls: int, num_observations: int):
+        weighted_sum = get_ev_sum(controllability_gramian)
+        self._controllability_mask = \
+            np.argsort(weighted_sum)[::-1][:num_controls]
+        weighted_sum = get_ev_sum(observability_gramian)
+        self._observability_mask = \
+            np.argsort(weighted_sum)[::-1][:num_observations]
+
+    @property
+    def num_controls(self):
+        return len(self._controllability_mask)
+
+    @property
+    def num_observations(self):
+        return len(self._observability_mask)
+
+    @property
+    def controllability(self):
+        return 1 - self.num_controls / self.n
+
+    @property
+    def observability(self):
+        return 1 - self.num_observations / self.n
