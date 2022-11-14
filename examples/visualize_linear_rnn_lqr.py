@@ -233,10 +233,10 @@ def plot_controller_effect(
                           height=5)
         g.map(sns.barplot, 'perturbation_level', 'metric')
     elif kind == 'line':
-        g = sns.relplot(data=c, x='perturbation_level',
-                        y='metric', col='perturbation_type', hue='trained',
+        g = sns.relplot(data=c, x='perturbation_level', y='metric',
+                        col='perturbation_type', hue='trained', kind='line',
                         col_order=PERTURBATIONS.keys(), style='trained',
-                        kind='line', palette=PALETTE, legend=True,
+                        palette=PALETTE, legend=True, markers=True,
                         facet_kws={'sharex': False, 'sharey': sharey})
     else:
         raise NotImplementedError
@@ -258,7 +258,9 @@ def plot_controller_effect(
             ax.set_xticklabels(['low', 'high'])
             ax.set_yticks(np.array(ax.get_ylim()) * [1.2, 0.9])
             ax.set_yticklabels(['low', 'high'])
-    g.axes[0, 0].legend()
+    g.axes[0, 0].legend(frameon=False)
+    if g.legend is not None:
+        g.legend.remove()
     g.despine(left=True)
     path_fig = os.path.join(path, f'controller_effect_{kind}.png')
     plt.savefig(path_fig, bbox_inches='tight')
@@ -275,7 +277,7 @@ def plot_gramian_vs_random(
                     col='params.perturbation_type', row='gramian_type',
                     kind='line', legend=True, hue='params.electrode_selection',
                     style='params.electrode_selection', palette=PALETTE,
-                    col_order=PERTURBATIONS.keys(),
+                    col_order=PERTURBATIONS.keys(), markers=True,
                     facet_kws={'sharex': False, 'sharey': sharey})
     g.set_axis_labels('', ylabel)
     g.set_titles('')
@@ -554,7 +556,7 @@ def get_model_perturbed_untrained(
 def get_runs_all(path: str, experiment_id: str, tag_start_time: str
                  ) -> pd.DataFrame:
     os.chdir(path)
-    runs = mlflow.search_runs([experiment_id],  # f'tags.resume_experiment'
+    runs = mlflow.search_runs([experiment_id],
                               f'tags.resume_experiment = "{tag_start_time}"')
     assert len(runs) > 0
     runs.dropna(inplace=True, subset=['metrics.controllability'])

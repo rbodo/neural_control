@@ -16,7 +16,8 @@ from examples.visualize_linear_rnn_lqr import (
     get_log_path, get_model_trained, get_model_unperturbed_untrained,
     get_training_data_unperturbed, plot_training_curve_unperturbed,
     get_training_data_perturbed, plot_training_curves_perturbed,
-    get_metric_vs_dropout, plot_metric_vs_dropout, PALETTE)
+    get_metric_vs_dropout, plot_metric_vs_dropout, PALETTE,
+    plot_controller_effect)
 from src.ppo_recurrent import RecurrentPPO
 
 
@@ -73,6 +74,11 @@ def main(experiment_id, experiment_name, tag_start_time):
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed, formatx=True,
                                    axis_labels=('Episode', 'Reward'))
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, ylabel='Reward')
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, ylabel='Reward',
+                           kind='line')
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -88,9 +94,11 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
-                                              training_data_perturbed,
-                                              'reward')
+    electrode_selections = config.perturbation.ELECTRODE_SELECTIONS
+    #runs['params.electrode_selection'] = 'random'
+    metric_vs_dropout = get_metric_vs_dropout(
+        runs, perturbations, electrode_selections, training_data_perturbed,
+        'reward')
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
@@ -224,7 +232,7 @@ def add_states(data: dict, states: np.ndarray):
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'nonlinear_rnn_rl'
-    _tag_start_time = '2022-11-09'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 

@@ -14,7 +14,7 @@ from examples.visualize_linear_rnn_lqr import (
     plot_metric_vs_dropout, add_states, get_training_data_perturbed,
     get_training_data_unperturbed, get_model_trained, get_metric_vs_dropout,
     get_model_unperturbed_untrained, plot_training_curve_unperturbed,
-    plot_training_curves_perturbed)
+    plot_training_curves_perturbed, plot_controller_effect)
 from src.control_systems import DiGym
 from src.ppo_recurrent import RecurrentPPO
 
@@ -73,6 +73,11 @@ def main(experiment_id, experiment_name, tag_start_time):
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed,
                                    ('Episode', 'Reward'), formatx=True)
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, ylabel='Reward')
+    plot_controller_effect(training_data_perturbed, log_path,
+                           test_metric_unperturbed, ylabel='Reward',
+                           kind='line')
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -89,9 +94,11 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
-                                              training_data_perturbed,
-                                              'reward')
+    electrode_selections = config.perturbation.ELECTRODE_SELECTIONS
+    #runs['params.electrode_selection'] = 'random'
+    metric_vs_dropout = get_metric_vs_dropout(
+        runs, perturbations, electrode_selections, training_data_perturbed,
+        'reward')
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
@@ -163,7 +170,7 @@ def get_model_perturbed_untrained(
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'linear_rnn_rl'
-    _tag_start_time = '2022-11-12'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 
