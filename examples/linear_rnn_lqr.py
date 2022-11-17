@@ -71,7 +71,6 @@ class NeuralPerturbationPipeline(ABC):
         self.masker = None
         self._resume_experiment = None
         self._runs = None  # Previous runs to resume.
-        self._path_perturbed = None  # Artifact path of perturbed model.
         self.argparser = None
 
     @abstractmethod
@@ -105,8 +104,7 @@ class NeuralPerturbationPipeline(ABC):
 
     @abstractmethod
     def train(self, perturbation_type: str, perturbation_level: float,
-              dropout_probability: Optional[float] = 0,
-              electrode_selection: Optional[str] = 'random',
+              dropout_probability: float, electrode_selection: str,
               save_model: Optional[bool] = True, **kwargs) -> dict:
         """Train the model (consisting of a neural system and a controller).
 
@@ -141,12 +139,6 @@ class NeuralPerturbationPipeline(ABC):
     @abstractmethod
     def evaluate(self, *args, **kwargs) -> Any:
         """Evaluate model."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def test_electrodes(self, *args, **kwargs) -> Any:
-        """Test different methods to select readout and stimulation electrodes.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -273,12 +265,13 @@ class NeuralPerturbationPipeline(ABC):
         # system controlling the double integrator environment).
         perturbation_type = ''
         perturbation_level = 0
+        dropout_probability = 0
         mlflow.log_params({run_name: seed,
                            'perturbation_type': perturbation_type,
                            'perturbation_level': perturbation_level,
-                           'dropout_probability': 0,
-                           'electrode_selection': 'all'})
-        self.train(perturbation_type, perturbation_level, **self.data_dict)
+                           'dropout_probability': dropout_probability})
+        self.train(perturbation_type, perturbation_level, dropout_probability,
+                   'random', **self.data_dict)
 
         # Remember where the baseline model has been saved.
         self.config.paths.FILEPATH_MODEL = get_artifact_path(
@@ -313,15 +306,6 @@ class NeuralPerturbationPipeline(ABC):
                 if is_done:
                     continue
                 mlflow.start_run(run_id, run_name='Perturbation level', tags=tags, nested=True)
-                mlflow.log_params({
-                    'seed': seed,
-                    'perturbation_type': perturbation_type,
-                    'perturbation_level': perturbation_level,
-                    'dropout_probability': 0,
-                    'electrode_selection': 'random'})
-                self.train(perturbation_type, perturbation_level,
-                           **self.data_dict)
-                self._path_perturbed = get_artifact_path()
                 for dropout_probability in tqdm(dropout_probabilities, 'Dropout probability', leave=False):
                     conditions['tags.mlflow.runName'] = 'Dropout probability'
                     conditions['params.dropout_probability'] = str(dropout_probability)
@@ -342,10 +326,9 @@ class NeuralPerturbationPipeline(ABC):
                             'perturbation_level': perturbation_level,
                             'dropout_probability': dropout_probability,
                             'electrode_selection': electrode_selection})
-                        self.test_electrodes(dropout_probability,
-                                             electrode_selection,
-                                             save_model=False,
-                                             **self.data_dict)
+                        self.train(perturbation_type, perturbation_level,
+                                   dropout_probability, electrode_selection,
+                                   **self.data_dict)
                         mlflow.end_run()
                     mlflow.end_run()
                 mlflow.end_run()
@@ -440,58 +423,8 @@ class LqrPipeline(NeuralPerturbationPipeline):
             x = mx.nd.moveaxis(x, 0, -1)
             return self.loss_function(x, u)
 
-    def test_electrodes(self, dropout_probability, electrode_selection,
-                        save_model=True, **kwargs):
-
-        environment = self.get_environment()
-
-        path_model = os.path.join(self._path_perturbed, 'models', 'rnn.params')
-        self.model = self.get_model(
-            freeze_neuralsystem=True, freeze_controller=True,
-            environment=environment, load_weights_from=path_model)
-
-        # Compute controllability and observability Gramians. Uses a model with
-        # random electrode selection trained in the previous iteration.
-        if electrode_selection == 'gramian':
-            path_gramians = os.path.join(self._path_perturbed, 'gramians.npz')
-            g = np.load(path_gramians)
-            g_c = g['controllability_gramian']
-            g_o = g['observability_gramian']
-            # We reuse the exact number of controls and observations from the
-            # model trained with random selection.
-            assert self.masker.p == dropout_probability
-            masker_kwargs = dict(controllability_gramian=g_c,
-                                 observability_gramian=g_o,
-                                 num_controls=self.masker.num_controls,
-                                 num_observations=self.masker.num_observations)
-        else:
-            rng = np.random.default_rng(self.config.SEED)
-            masker_kwargs = dict(rng=rng)
-
-        # Reduce controllability and observability of neural system by
-        # dropping out rows from the stimulation and readout matrices of the
-        # controller.
-        self.masker = Masker(self.model, dropout_probability,
-                             electrode_selection)
-        self.masker.compute_mask(**masker_kwargs)
-        self.masker.apply_mask()
-
-        data_test = kwargs['data_test']
-        test_loss = self.evaluate(data_test, environment, 'trajectory_-1.png')
-        mlflow.log_metric('test_loss', test_loss, -1)
-
-        if save_model:
-            path_model = get_artifact_path('models/rnn.params')
-            os.makedirs(os.path.dirname(path_model), exist_ok=True)
-            self.model.save_parameters(path_model)
-            logging.info(f"Saved model to {path_model}.")
-
-        mlflow.log_metrics({'controllability': self.masker.controllability,
-                            'observability': self.masker.observability})
-
-    def train(self, perturbation_type, perturbation_level,
-              dropout_probability=0, electrode_selection='random',
-              save_model=True, **kwargs):
+    def train(self, perturbation_type, perturbation_level, dropout_probability,
+              electrode_selection, save_model=True, **kwargs):
         T = self.config.simulation.T
         dt = T / self.config.simulation.NUM_STEPS
         seed = self.config.SEED
@@ -516,7 +449,6 @@ class LqrPipeline(NeuralPerturbationPipeline):
                                 observability_gramian=g_o)
             # We reuse the exact number of controls and observations from the
             # model trained with random selection.
-            assert self.masker.p == dropout_probability
             masker_kwargs = dict(controllability_gramian=g_c,
                                  observability_gramian=g_o,
                                  num_controls=self.masker.num_controls,
@@ -610,17 +542,6 @@ class LqrPipeline(NeuralPerturbationPipeline):
             os.makedirs(os.path.dirname(path_model), exist_ok=True)
             self.model.save_parameters(path_model)
             logging.info(f"Saved model to {path_model}.")
-
-        # Compute controllability and observability Gramians after training.
-        if self.config.get('COMPUTE_GRAMIANS', True):
-            logging.info("Computing Gramians...")
-            gramians = Gramians(self.model, environment, self.device, dt, T)
-            g_c = gramians.compute_controllability()
-            g_o = gramians.compute_observability()
-
-            np.savez_compressed(get_artifact_path('gramians.npz'),
-                                controllability_gramian=g_c,
-                                observability_gramian=g_o)
 
         mlflow.log_metrics({'controllability': self.masker.controllability,
                             'observability': self.masker.observability})

@@ -72,8 +72,9 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show loss vs epochs of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
-    training_data_perturbed = get_training_data_perturbed(runs, perturbations,
-                                                          path)
+    dropout_probabilities = config.perturbation.DROPOUT_PROBABILITIES
+    training_data_perturbed = get_training_data_perturbed(
+        runs, perturbations, dropout_probabilities, path)
     test_metric_unperturbed = runs_unperturbed['metrics.test_loss'].mean()
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed, logy=True)
@@ -180,7 +181,8 @@ def plot_training_curves_perturbed(
         logy: Optional[bool] = False, formatx: Optional[bool] = False,
         sharey: Optional[bool] = True):
     # Get test curves corresponding to full controllability and observability.
-    data_full_control = data.loc[data.phase == 'test']
+    data_full_control = data.loc[(data.dropout_probability == 0) &
+                                 (data.phase == 'test')]
     g = sns.relplot(data=data_full_control, x='time',
                     y='metric', col='perturbation_type',
                     col_order=PERTURBATIONS.keys(),
@@ -213,7 +215,8 @@ def plot_controller_effect(
         formatx: Optional[bool] = False, sharey: Optional[bool] = True,
         remove_ticks: Optional[bool] = True, kind: Optional[str] = 'bar'):
     # Get test curves corresponding to full controllability and observability.
-    data_full_control = data.loc[data.phase == 'test']
+    data_full_control = data.loc[(data.dropout_probability == 0) &
+                                 (data.phase == 'test')]
     # Extract first and last timestep and label it as False / True in new
     # "trained" column.
     t_max = data_full_control['time'].max()
@@ -353,24 +356,29 @@ def get_training_data_unperturbed(runs: pd.DataFrame, path: str,
 
 
 def get_training_data_perturbed(runs: pd.DataFrame, perturbations: dict,
-                                path: str, metric: Optional[str] = 'loss',
+                                dropout_probabilities: List[float], path: str,
+                                metric: Optional[str] = 'loss',
                                 eval_every_n: Optional[int] = 1
                                 ) -> pd.DataFrame:
     data = {'time': [], 'metric': [], 'phase': [], 'neuralsystem': 'RNN',
-            'perturbation_type': [], 'perturbation_level': []}
+            'perturbation_type': [], 'perturbation_level': [],
+            'dropout_probability': []}
     for perturbation_type in perturbations.keys():
         for perturbation_level in perturbations[perturbation_type]:
-            runs_perturbed = get_runs_perturbed(runs, perturbation_type,
-                                                perturbation_level)
-            for run_id in runs_perturbed['run_id']:
-                n = add_training_curve(data, path, run_id, 'test', metric,
-                                       eval_every_n)
-                add_scalars(data, n, perturbation_type=perturbation_type,
-                            perturbation_level=perturbation_level)
-                n = add_training_curve(data, path, run_id, 'training', metric,
-                                       eval_every_n)
-                add_scalars(data, n, perturbation_type=perturbation_type,
-                            perturbation_level=perturbation_level)
+            for dropout_probability in dropout_probabilities:
+                runs_perturbed = get_runs_perturbed(runs, perturbation_type,
+                                                    perturbation_level)
+                for run_id in runs_perturbed['run_id']:
+                    n = add_training_curve(data, path, run_id, 'test',
+                                           metric, eval_every_n)
+                    add_scalars(data, n, perturbation_type=perturbation_type,
+                                perturbation_level=perturbation_level,
+                                dropout_probability=dropout_probability)
+                    n = add_training_curve(data, path, run_id, 'training',
+                                           metric, eval_every_n)
+                    add_scalars(data, n, perturbation_type=perturbation_type,
+                                perturbation_level=perturbation_level,
+                                dropout_probability=dropout_probability)
     return pd.DataFrame(data)
 
 
@@ -487,7 +495,8 @@ def get_metric_vs_dropout(runs: pd.DataFrame, perturbations: dict,
                     # r are the uncontrolled perturbed runs at training begin.
                     r = t.loc[(t['perturbation_type'] == perturbation_type) &
                               (t['perturbation_level'] == perturbation_level) &
-                              (t['time'] == 0)]
+                              (t['time'] == 0) &
+                              (t['dropout_probability'] == 0)]
                     # Add training and test metric.
                     data[f'metrics.test_{metric}'] += list(
                         r[r.phase == 'test']['metric'])
@@ -508,7 +517,7 @@ def get_metric_vs_dropout(runs: pd.DataFrame, perturbations: dict,
                  'params.perturbation_type', 'params.perturbation_level',
                  'params.electrode_selection'])
     # Remove empty rows corresponding to the unperturbed baseline models.
-    runs.dropna(inplace=True, subset=[f'metrics.test_{metric}'])
+    runs = runs.loc[runs['params.perturbation_type'] != '']
     # Concatenate training curves with baseline results.
     return pd.concat([runs, pd.DataFrame(data)], ignore_index=True)
 
@@ -550,7 +559,7 @@ def get_runs_all(path: str, experiment_id: str, tag_start_time: str
     runs = mlflow.search_runs([experiment_id],
                               f'tags.resume_experiment = "{tag_start_time}"')
     assert len(runs) > 0
-    # runs.dropna(inplace=True, subset=['metrics.controllability'])
+    runs.dropna(inplace=True, subset=['metrics.controllability'])
     return runs
 
 
@@ -558,9 +567,8 @@ def get_runs_perturbed(runs: pd.DataFrame, perturbation_type: str,
                        perturbation_level: float) -> pd.DataFrame:
     return runs.loc[
         (runs['params.perturbation_type'] == perturbation_type) &
-        (runs['params.perturbation_level'] == str(perturbation_level)),
-        # (runs['params.electrode_selection'] == 'all')
-    ]
+        (runs['params.perturbation_level'] == str(perturbation_level)) &
+        (runs['params.dropout_probability'] == '0')]
 
 
 def get_runs_unperturbed(runs: pd.DataFrame) -> pd.DataFrame:
@@ -577,8 +585,6 @@ def add_training_curve(data: dict, path: str, run_id: str, phase: str,
     assert phase in {'training', 'test'}
     filepath = os.path.join(path, run_id, 'metrics', f'{phase}_{metric}')
     values, times = np.loadtxt(filepath, usecols=[1, 2], unpack=True)
-    values = np.atleast_1d(values)
-    times = np.atleast_1d(times)
     num_steps = len(values)
     data['time'] += list((times + 1) * eval_every_n)
     data['metric'] += list(values)
@@ -612,7 +618,7 @@ def draw_colorbar():
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'linear_rnn_lqr'
-    _tag_start_time = '2022-11-15'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 

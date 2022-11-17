@@ -342,9 +342,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
 
         return model
 
-    def train(self, perturbation_type, perturbation_level,
-              dropout_probability=0, electrode_selection='random',
-              save_model=True, **kwargs):
+    def train(self, perturbation_type, perturbation_level, dropout_probability,
+              electrode_selection, save_model=True, **kwargs):
         num_steps = self.config.simulation.NUM_STEPS
         T = self.config.simulation.T
         dt = T / num_steps
@@ -372,7 +371,6 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
                                 observability_gramian=g_o)
             # We reuse the exact number of controls and observations from the
             # model trained with random selection.
-            assert self.masker.p == dropout_probability
             masker_kwargs = dict(controllability_gramian=g_c,
                                  observability_gramian=g_o,
                                  num_controls=self.masker.num_controls,
