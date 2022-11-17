@@ -66,10 +66,8 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show metric vs times of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
-    dropout_probabilities = config.perturbation.DROPOUT_PROBABILITIES
     training_data_perturbed = get_training_data_perturbed(
-        runs, perturbations, dropout_probabilities, path, 'reward',
-        eval_every_n)
+        runs, perturbations, path, 'reward', eval_every_n)
     test_metric_unperturbed = runs_unperturbed['metrics.test_reward'].mean()
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed, formatx=True,
@@ -95,7 +93,7 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
     electrode_selections = config.perturbation.ELECTRODE_SELECTIONS
-    #runs['params.electrode_selection'] = 'random'
+    # runs['params.electrode_selection'] = 'random'
     metric_vs_dropout = get_metric_vs_dropout(
         runs, perturbations, electrode_selections, training_data_perturbed,
         'reward')

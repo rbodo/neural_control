@@ -8,7 +8,7 @@ def get_config():
 
     config.GPU = 4
     config.EXPERIMENT_NAME = 'linear_rnn_lqr'
-    config.RESUME_EXPERIMENT = '2022-11-11'
+    config.RESUME_EXPERIMENT = '2022-11-15'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
@@ -41,7 +41,7 @@ def get_config():
         ('sensor', [1, 2, 4, 8, 16]),
         ('actuator', [0.1, 0.5, 1, 2, 3]),
         ('processor', [0.1, 0.2, 0.3, 0.4, 0.5])]
-    config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9]
+    config.perturbation.DROPOUT_PROBABILITIES = [0, 0.1, 0.5, 0.7, 0.9, 1]
 
     config.SEEDS = [43, 234, 55, 2, 5632]
 

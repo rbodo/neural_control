@@ -418,7 +418,7 @@ def get_ev_sum(gramian: np.ndarray, threshold: Optional[float] = 0.9):
     n = np.min(np.flatnonzero(fraction_explained > threshold))
     # Add up eigenvectors weighted by corresponding eigenvalues.
     weighted_sum = np.dot(v[:, :n], w[:n])
-    return weighted_sum
+    return np.abs(weighted_sum)
 
 
 class AbstractMasker(ABC):
@@ -454,11 +454,9 @@ class AbstractMasker(ABC):
                               observability_gramian: np.ndarray,
                               num_controls: int, num_observations: int):
         weighted_sum = get_ev_sum(controllability_gramian)
-        self._controllability_mask = \
-            np.argsort(weighted_sum)[::-1][:num_controls]
+        self._controllability_mask = np.argsort(weighted_sum)[:num_controls]
         weighted_sum = get_ev_sum(observability_gramian)
-        self._observability_mask = \
-            np.argsort(weighted_sum)[::-1][:num_observations]
+        self._observability_mask = np.argsort(weighted_sum)[:num_observations]
 
     @property
     def num_controls(self):
