@@ -94,11 +94,9 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    electrode_selections = config.perturbation.ELECTRODE_SELECTIONS
-    #runs['params.electrode_selection'] = 'random'
-    metric_vs_dropout = get_metric_vs_dropout(
-        runs, perturbations, electrode_selections, training_data_perturbed,
-        'reward')
+    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
+                                              training_data_perturbed,
+                                              'reward')
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
@@ -170,7 +168,8 @@ def get_model_perturbed_untrained(
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'linear_rnn_rl'
-    _tag_start_time = '2022-11-11'
+    # _tag_start_time = '2022-10-01'
+    _tag_start_time = '2022-09-26_20:22:28'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 

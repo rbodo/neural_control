@@ -9,7 +9,6 @@ import torch
 from torch import nn
 from yacs.config import CfgNode
 
-from src.control_systems import AbstractMasker
 from src.empirical_gramians import emgr
 from src.utils import get_lqr_cost, atleast_3d
 
@@ -412,12 +411,17 @@ class DiGym(gym.Env):
         logging.info("States: ", self.states, "\tCost: ", self.cost)
 
 
-class Masker(AbstractMasker):
+class Masker:
     """Helper class to set certain rows in the readout and stimulation matrix
     of a controller to zero."""
-    def __init__(self, model: ControlledRnn, p: float, method: str):
-        super().__init__(model, p, method)
-        self.n = self.model.hidden_size
+    def __init__(self, model: ControlledRnn, p, rng: np.random.Generator):
+        self.model = model
+        self.p = p
+        n = self.model.hidden_size
+        self._controllability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
+        self._observability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
+        self.controllability = 1 - len(self._controllability_mask) / n
+        self.observability = 1 - len(self._observability_mask) / n
 
     def apply_mask(self):
         if self.p == 0:
