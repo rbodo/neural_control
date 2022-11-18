@@ -17,7 +17,7 @@ from examples import configs
 from examples.linear_rnn_lqr import LqrPipeline
 from src.control_systems_mxnet import (StochasticLinearIOSystem,
                                        ClosedControlledNeuralSystem)
-from src.utils import get_data, uri_to_path
+from src.utils import get_data
 
 sns.set_style('white')
 sns.set_context('talk')
@@ -100,8 +100,8 @@ def main(experiment_id, experiment_name, tag_start_time):
     # of controllability and observability.
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed)
-    n = model_untrained.neuralsystem.num_hidden
-    num_electrodes = get_num_electrodes(runs, perturbations, n)
+    n = config.model.NUM_HIDDEN_NEURALSYSTEM
+    num_electrodes = get_num_electrodes(runs, perturbations, path, n)
     plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
                                    test_metric_unperturbed, logy=True,
                                    num_electrodes=num_electrodes)
@@ -370,19 +370,19 @@ def get_dim_at_energy(gramian: np.ndarray,
     return n
 
 
-def get_num_electrodes(runs: pd.DataFrame, perturbations: dict,
+def get_num_electrodes(runs: pd.DataFrame, perturbations: dict, path: str,
                        num_neurons: int, thr: Optional[float] = 0.9
                        ) -> pd.DataFrame:
     data = {'perturbation_type': [], 'perturbation_level': [],
-            'num_sensors': [], 'num_actuators': [], }
+            'num_sensors': [], 'num_actuators': []}
     for perturbation in perturbations.keys():
         for level in perturbations[perturbation]:
-            artifact_uris = runs.loc[
+            run_ids = runs.loc[
                 (runs['params.perturbation_type'] == perturbation) &
                 (runs['params.perturbation_level'] == str(level)) &
-                (runs['params.dropout_probability'] == '0')]['artifact_uri']
-            for artifact_uri in artifact_uris:
-                g = np.load(os.path.join(uri_to_path(artifact_uri),
+                (runs['params.dropout_probability'] == '0')]['run_id']
+            for run_id in run_ids:
+                g = np.load(os.path.join(path, run_id, 'artifacts',
                                          'gramians.npz'))
                 n_o = get_dim_at_energy(g['observability_gramian'], thr)
                 n_c = get_dim_at_energy(g['controllability_gramian'], thr)
@@ -601,7 +601,7 @@ def get_runs_all(path: str, experiment_id: str, tag_start_time: str
                  ) -> pd.DataFrame:
     os.chdir(path)
     runs = mlflow.search_runs([experiment_id],
-                              f'tags.main_start_time = "{tag_start_time}"')
+                              f'tags.resume_experiment = "{tag_start_time}"')
     assert len(runs) > 0
     runs.dropna(inplace=True, subset=['metrics.controllability'])
     return runs
@@ -620,7 +620,8 @@ def get_runs_unperturbed(runs: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_log_path(experiment_name: str) -> str:
-    return os.path.expanduser(f'~/Data/neural_control/{experiment_name}')
+    return os.path.expanduser(
+        f'~/Data/neural_control_snellius/{experiment_name}')
 
 
 def add_training_curve(data: dict, path: str, run_id: str, phase: str,

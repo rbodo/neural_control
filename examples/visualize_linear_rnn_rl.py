@@ -98,10 +98,10 @@ def main(experiment_id, experiment_name, tag_start_time):
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed,
                                               'reward')
-    n = model_untrained.neuralsystem.num_hidden
-    num_electrodes = get_num_electrodes(runs, perturbations, n)
+    n = config.model.NUM_HIDDEN_NEURALSYSTEM
+    num_electrodes = get_num_electrodes(runs, perturbations, path, n)
     plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
-                                   test_metric_unperturbed, logy=True,
+                                   test_metric_unperturbed, 'test_reward',
                                    num_electrodes=num_electrodes)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
@@ -175,7 +175,7 @@ if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'linear_rnn_rl'
     # _tag_start_time = '2022-10-01'
-    _tag_start_time = '2022-09-26_20:22:28'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 
