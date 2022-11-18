@@ -14,7 +14,8 @@ from examples.visualize_linear_rnn_lqr import (
     plot_metric_vs_dropout, add_states, get_training_data_perturbed,
     get_training_data_unperturbed, get_model_trained, get_metric_vs_dropout,
     get_model_unperturbed_untrained, plot_training_curve_unperturbed,
-    plot_training_curves_perturbed, plot_controller_effect)
+    plot_training_curves_perturbed, plot_controller_effect, get_num_electrodes,
+    plot_metric_vs_dropout_average)
 from src.control_systems import DiGym
 from src.ppo_recurrent import RecurrentPPO
 
@@ -97,6 +98,11 @@ def main(experiment_id, experiment_name, tag_start_time):
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed,
                                               'reward')
+    n = model_untrained.neuralsystem.num_hidden
+    num_electrodes = get_num_electrodes(runs, perturbations, n)
+    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
+                                   test_metric_unperturbed, logy=True,
+                                   num_electrodes=num_electrodes)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 

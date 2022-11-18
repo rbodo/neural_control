@@ -2,6 +2,7 @@ import os
 import sys
 from collections import OrderedDict
 
+from matplotlib.ticker import PercentFormatter
 from typing import Tuple, List, Optional
 
 import mlflow
@@ -16,7 +17,7 @@ from examples import configs
 from examples.linear_rnn_lqr import LqrPipeline
 from src.control_systems_mxnet import (StochasticLinearIOSystem,
                                        ClosedControlledNeuralSystem)
-from src.utils import get_data
+from src.utils import get_data, uri_to_path
 
 sns.set_style('white')
 sns.set_context('talk')
@@ -99,6 +100,11 @@ def main(experiment_id, experiment_name, tag_start_time):
     # of controllability and observability.
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed)
+    n = model_untrained.neuralsystem.num_hidden
+    num_electrodes = get_num_electrodes(runs, perturbations, n)
+    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
+                                   test_metric_unperturbed, logy=True,
+                                   num_electrodes=num_electrodes)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, logy=True)
 
@@ -264,6 +270,59 @@ def plot_controller_effect(
     plt.show()
 
 
+def plot_metric_vs_dropout_average(
+        data: pd.DataFrame, path: str, test_metric_unperturbed: float,
+        metric: Optional[str] = 'test_loss', logy: Optional[bool] = False,
+        num_electrodes: Optional[pd.DataFrame] = None):
+    ylabel = 'Reward' if metric == 'test_reward' else 'Loss'
+    g = sns.relplot(data=data, x='gramian_value', y='metrics.' + metric,
+                    style='gramian_type', col='params.perturbation_type',
+                    hue='gramian_type', palette=PALETTE,
+                    col_order=PERTURBATIONS.keys(), kind='line', legend=True,
+                    facet_kws={'sharex': True, 'sharey': True})
+
+    # Draw unperturbed baseline.
+    g.refline(y=test_metric_unperturbed, color='k', linestyle=':',
+              label='unperturbed')
+
+    # Draw electrode number to achieve a certain energy in eigenspectrum.
+    if num_electrodes is not None:
+        d = num_electrodes.groupby(['perturbation_type']).mean()
+        for i, perturbation in enumerate(PERTURBATIONS.keys()):
+            n_c = d.loc[perturbation]['num_actuators']
+            n_o = d.loc[perturbation]['num_sensors']
+            ax = g.axes[0, i]
+            ax.annotate('', xy=(n_c, 0), xytext=(n_c, -0.1),
+                        xycoords='axes fraction',
+                        arrowprops=dict(color=ax.lines[0].get_color(),
+                                        linestyle=ax.lines[0].get_linestyle()))
+            ax.annotate('', xy=(n_o, 0), xytext=(n_o, -0.1),
+                        xycoords='axes fraction',
+                        arrowprops=dict(color=ax.lines[1].get_color(),
+                                        linestyle=ax.lines[1].get_linestyle()))
+
+    if logy:
+        g.set(yscale='log')
+    g.set(xlim=[-0.05, 1.05])
+    g.set_axis_labels('', ylabel)
+    for i, title in enumerate(PERTURBATIONS.values()):
+        ax = g.axes[0, i]
+        ax.set_title(title)
+        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0,
+                                                      symbol=''))
+    g.axes[0, 0].set(yticklabels=[])
+    g.axes[0, 0].legend(g.axes[0, 0].lines[2:], ['stimulation', 'recording',
+                                                 'unperturbed'], frameon=False)
+    if g.legend is not None:
+        g.legend.remove()
+    g.despine(left=True)
+    for ax in g.axes[0]:
+        ax.set_xlabel('Electrode coverage [%]')
+    path_fig = os.path.join(path, 'metric_vs_dropout_average.png')
+    plt.savefig(path_fig, bbox_inches='tight')
+    plt.show()
+
+
 def plot_metric_vs_dropout(data: pd.DataFrame, path: str,
                            test_metric_unperturbed: float,
                            metric: Optional[str] = 'test_loss',
@@ -297,6 +356,41 @@ def plot_metric_vs_dropout(data: pd.DataFrame, path: str,
     path_fig = os.path.join(path, 'metric_vs_dropout.png')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
+
+
+def get_dim_at_energy(gramian: np.ndarray,
+                      threshold: Optional[float] = 0.9) -> int:
+    # Compute eigenvalues and eigenvectors of Gramian.
+    w, v = np.linalg.eigh(gramian)
+    # Sort ascending.
+    w = w[::-1]
+    # Determine how many eigenvectors to use.
+    fraction_explained = np.cumsum(w) / np.sum(w)
+    n = np.min(np.flatnonzero(fraction_explained > threshold))
+    return n
+
+
+def get_num_electrodes(runs: pd.DataFrame, perturbations: dict,
+                       num_neurons: int, thr: Optional[float] = 0.9
+                       ) -> pd.DataFrame:
+    data = {'perturbation_type': [], 'perturbation_level': [],
+            'num_sensors': [], 'num_actuators': [], }
+    for perturbation in perturbations.keys():
+        for level in perturbations[perturbation]:
+            artifact_uris = runs.loc[
+                (runs['params.perturbation_type'] == perturbation) &
+                (runs['params.perturbation_level'] == str(level)) &
+                (runs['params.dropout_probability'] == '0')]['artifact_uri']
+            for artifact_uri in artifact_uris:
+                g = np.load(os.path.join(uri_to_path(artifact_uri),
+                                         'gramians.npz'))
+                n_o = get_dim_at_energy(g['observability_gramian'], thr)
+                n_c = get_dim_at_energy(g['controllability_gramian'], thr)
+                data['perturbation_type'].append(perturbation)
+                data['perturbation_level'].append(level)
+                data['num_sensors'].append(n_o / num_neurons)
+                data['num_actuators'].append(n_c / num_neurons)
+    return pd.DataFrame(data)
 
 
 def get_training_data_unperturbed(runs: pd.DataFrame, path: str,
@@ -507,7 +601,7 @@ def get_runs_all(path: str, experiment_id: str, tag_start_time: str
                  ) -> pd.DataFrame:
     os.chdir(path)
     runs = mlflow.search_runs([experiment_id],
-                              f'tags.resume_experiment = "{tag_start_time}"')
+                              f'tags.main_start_time = "{tag_start_time}"')
     assert len(runs) > 0
     runs.dropna(inplace=True, subset=['metrics.controllability'])
     return runs

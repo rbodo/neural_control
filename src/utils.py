@@ -257,7 +257,11 @@ def get_artifact_path(relative_subpath: Optional[str] = None) -> str:
     If `relative_subpath` is specified, a subdirectory with this name will be
     created in the base directory.
     """
-    return unquote(urlparse(mlflow.get_artifact_uri(relative_subpath)).path)
+    return uri_to_path(mlflow.get_artifact_uri(relative_subpath))
+
+
+def uri_to_path(uri: str) -> str:
+    return unquote(urlparse(uri).path)
 
 
 def get_trajectories(data: pd.DataFrame, num_steps: int,
