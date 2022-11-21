@@ -17,7 +17,7 @@ from examples.visualize_linear_rnn_lqr import (
     get_training_data_unperturbed, plot_training_curve_unperturbed,
     get_training_data_perturbed, plot_training_curves_perturbed,
     get_metric_vs_dropout, plot_metric_vs_dropout, PALETTE,
-    plot_controller_effect)
+    plot_controller_effect, plot_metric_vs_dropout_average)
 from src.ppo_recurrent import RecurrentPPO
 
 
@@ -97,6 +97,8 @@ def main(experiment_id, experiment_name, tag_start_time):
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed,
                                               'reward')
+    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
+                                   test_metric_unperturbed, 'test_reward')
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
@@ -230,8 +232,7 @@ def add_states(data: dict, states: np.ndarray):
 if __name__ == '__main__':
     _experiment_id = '1'
     _experiment_name = 'nonlinear_rnn_rl'
-    # _tag_start_time = '2022-10-01'
-    _tag_start_time = '2022-09-26_17:58:31'
+    _tag_start_time = '2022-11-11'
 
     main(_experiment_id, _experiment_name, _tag_start_time)
 

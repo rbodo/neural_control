@@ -7,7 +7,7 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = 'cuda'
+    config.GPU = 2
     config.EXPERIMENT_NAME = 'linear_rnn_lqr'
     # config.RESUME_EXPERIMENT = '2022-09-21_17:29:07'
 
