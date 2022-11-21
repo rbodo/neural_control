@@ -2,7 +2,7 @@ import os
 import sys
 
 from gym.wrappers import TimeLimit
-from typing import List, Union
+from typing import List, Union, Optional
 
 import pandas as pd
 
@@ -10,12 +10,12 @@ from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline, run_single
 from examples.visualize_linear_rnn_lqr import (
     add_scalars, get_runs_perturbed, get_runs_unperturbed,
-    get_runs_all, get_log_path, plot_trajectories,
-    plot_metric_vs_dropout, add_states, get_training_data_perturbed,
-    get_training_data_unperturbed, get_model_trained, get_metric_vs_dropout,
-    get_model_unperturbed_untrained, plot_training_curve_unperturbed,
-    plot_training_curves_perturbed, plot_controller_effect, get_num_electrodes,
-    plot_metric_vs_dropout_average)
+    get_runs_all, get_log_path, plot_trajectories_unperturbed,
+    plot_trajectories_perturbed, plot_metric_vs_dropout, add_states,
+    get_training_data_perturbed, get_training_data_unperturbed,
+    get_model_trained, get_metric_vs_dropout, get_model_unperturbed_untrained,
+    plot_training_curve_unperturbed, plot_training_curves_perturbed,
+    plot_controller_effect, get_num_electrodes, plot_metric_vs_dropout_average)
 from src.control_systems import DiGym
 from src.ppo_recurrent import RecurrentPPO
 
@@ -52,9 +52,7 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample',
-                      log_path, 'trajectories_unperturbed.png',
-                      show_legend=False)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
@@ -76,22 +74,11 @@ def main(experiment_id, experiment_name, tag_start_time):
                                    ('Episode', 'Reward'), formatx=True)
     plot_controller_effect(training_data_perturbed, log_path,
                            test_metric_unperturbed, ylabel='Reward')
-    plot_controller_effect(training_data_perturbed, log_path,
-                           test_metric_unperturbed, ylabel='Reward',
-                           kind='line')
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
         [0], environment, path, perturbations, pipeline, runs)
-
-    for perturbation in perturbations.keys():
-        # Select one perturbation type.
-        data_subsystem = trajectories_perturbed.loc[
-            trajectories_perturbed['perturbation_type'] == perturbation]
-        plot_trajectories(data_subsystem, 'perturbation_level',
-                          'Perturbation level', log_path,
-                          f'trajectories_perturbed_{perturbation}.png',
-                          show_legend=False)
+    plot_trajectories_perturbed(trajectories_perturbed, log_path)
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
@@ -111,54 +98,57 @@ def get_trajectories_unperturbed(
         model_trained: RecurrentPPO, model_untrained: RecurrentPPO,
         environment: Union[DiGym, TimeLimit]) -> pd.DataFrame:
 
-    data = {'index': [], 'controller': [], 'stage': [], 'x0': [], 'x1': []}
+    data = {'index': [], 'controller': [], 'x0': [], 'x1': []}
     for test_index in range(4):
-
-        # Get trajectories of untrained model.
-        environment_states, _ = run_single(environment, model_untrained)
-        add_states(data, environment_states)
-        add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN', stage='untrained')
 
         # Get trajectories of trained model.
         environment_states, _ = run_single(environment, model_trained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN', stage='trained')
+                    controller='RNN after training')
+
+        # Get trajectories of untrained model.
+        environment_states, _ = run_single(environment, model_untrained)
+        add_states(data, environment_states)
+        add_scalars(data, len(environment_states), index=test_index,
+                    controller='RNN before training')
+
     return pd.DataFrame(data)
 
 
 def get_trajectories_perturbed(
         test_indexes: List[int], environment: Union[DiGym, TimeLimit],
         path: str, perturbations: dict, pipeline: LinearRlPipeline,
-        runs: pd.DataFrame) -> pd.DataFrame:
-    data = {'index': [], 'controller': [], 'stage': [], 'x0': [], 'x1': [],
+        runs: pd.DataFrame, use_relative_levels: Optional[bool] = True
+) -> pd.DataFrame:
+    data = {'index': [], 'controller': [], 'x0': [], 'x1': [],
             'perturbation_type': [], 'perturbation_level': []}
     for perturbation_type in perturbations.keys():
-        for perturbation_level in perturbations[perturbation_type]:
-            runs_perturbed = get_runs_perturbed(runs, perturbation_type,
-                                                perturbation_level)
+        for i, level in enumerate(perturbations[perturbation_type]):
+            runs_perturbed = get_runs_perturbed(runs, perturbation_type, level)
             model_trained = get_model_trained(
                 pipeline, environment, runs_perturbed, path)
             model_untrained = get_model_perturbed_untrained(
                 pipeline, environment, runs_perturbed, path)
+            if use_relative_levels:
+                level = (i + 1) / len(perturbations[perturbation_type])
             for test_index in test_indexes:
-                kwargs = dict(index=test_index,
-                              perturbation_type=perturbation_type,
-                              perturbation_level=perturbation_level)
+                kwargs = dict(index=test_index, perturbation_level=level,
+                              perturbation_type=perturbation_type)
+
+                # Get trajectories of trained model.
+                environment_states, _ = run_single(environment, model_trained)
+                add_states(data, environment_states)
+                add_scalars(data, len(environment_states),
+                            controller='RNN after training', **kwargs)
 
                 # Get trajectories of untrained model.
                 environment_states, _ = run_single(environment,
                                                    model_untrained)
                 add_states(data, environment_states)
-                add_scalars(data, len(environment_states), controller='RNN',
-                            stage='untrained', **kwargs)
+                add_scalars(data, len(environment_states),
+                            controller='RNN before training', **kwargs)
 
-                # Get trajectories of trained model.
-                environment_states, _ = run_single(environment, model_trained)
-                add_states(data, environment_states)
-                add_scalars(data, len(environment_states), controller='RNN',
-                            stage='trained', **kwargs)
     return pd.DataFrame(data)
 
 

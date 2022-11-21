@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union, Sized
 
 import gym
 import mlflow
@@ -114,7 +114,7 @@ def run_single(env: Union[DiGym, POMDP],
                model: Union[RecurrentPPO, BaseAlgorithm],
                monitor: Optional[Monitor] = None,
                deterministic: Optional[bool] = True
-               ) -> Tuple[np.ndarray, list]:
+               ) -> Tuple[Union[np.ndarray, Sized], list]:
     """Run an RL agent for one episode and return states and rewards.
 
     Parameters

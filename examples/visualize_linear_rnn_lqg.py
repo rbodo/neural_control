@@ -8,8 +8,8 @@ import pandas as pd
 from examples import configs
 from examples.linear_rnn_lqg import LqgPipeline
 from examples.visualize_linear_rnn_lqr import (
-    plot_trajectories, add_states_mx, plot_training_curve_unperturbed,
-    get_training_data_unperturbed, add_scalars, get_log_path, get_runs_all)
+    add_states_mx, plot_training_curve_unperturbed, get_log_path, get_runs_all,
+    plot_trajectories_unperturbed, get_training_data_unperturbed, add_scalars)
 from src.control_systems_mxnet import (StochasticLinearIOSystem,
                                        ClosedControlledNeuralSystem)
 from src.utils import get_data
@@ -47,10 +47,9 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories(trajectories_unperturbed, 'index', 'Test sample',
-                      log_path, 'trajectories_unperturbed.png')
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
 
-    # Show loss vs epochs of unperturbed model.
+    # Show metric vs times of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(runs, path)
     plot_training_curve_unperturbed(training_data_unperturbed, log_path,
                                     logy=True)
@@ -64,7 +63,7 @@ def get_trajectories_unperturbed(
     num_batches = len(data_test)
     test_indexes = np.arange(0, num_batches, 16)
     num_steps = model_trained.num_steps
-    data = {'index': [], 'controller': [], 'stage': [], 'x0': [], 'x1': []}
+    data = {'index': [], 'controller': [], 'x0': [], 'x1': []}
     for test_index, (lqr_states, lqr_control) in enumerate(data_test):
         # Compute baseline loss.
         lqr_states = lqr_states.as_in_context(pipeline.device)
@@ -76,23 +75,21 @@ def get_trajectories_unperturbed(
         lqr_states = mx.nd.moveaxis(lqr_states, -1, 0)
         x_init = lqr_states[:1]
 
-        # Get trajectories of untrained model and LQG.
-        _, environment_states = model_untrained(x_init)
-        add_states_mx(data, environment_states)
-        add_scalars(data, num_steps, index=test_index, controller='RNN',
-                    stage='untrained')
-        add_states_mx(data, lqr_states)
-        add_scalars(data, num_steps, index=test_index, controller='LQG',
-                    stage='untrained')
-
-        # Get trajectories of trained model and LQG.
+        # Get trajectories of trained model.
         _, environment_states = model_trained(x_init)
         add_states_mx(data, environment_states)
-        add_scalars(data, num_steps, index=test_index, controller='RNN',
-                    stage='trained')
+        add_scalars(data, num_steps, index=test_index,
+                    controller='RNN after training')
+
+        # Get trajectories of untrained model.
+        _, environment_states = model_untrained(x_init)
+        add_states_mx(data, environment_states)
+        add_scalars(data, num_steps, index=test_index,
+                    controller='RNN before training')
+
+        # Store LQG trajectory.
         add_states_mx(data, lqr_states)
-        add_scalars(data, num_steps, index=test_index, controller='LQG',
-                    stage='trained')
+        add_scalars(data, num_steps, index=test_index, controller='LQG')
     return pd.DataFrame(data)
 
 
