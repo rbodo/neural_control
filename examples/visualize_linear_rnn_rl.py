@@ -5,6 +5,7 @@ from gym.wrappers import TimeLimit
 from typing import List, Union, Optional
 
 import pandas as pd
+import seaborn as sns
 
 from examples import configs
 from examples.linear_rnn_rl import LinearRlPipeline, run_single
@@ -49,10 +50,12 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
+    title = 'C. RL (particle)'
+
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
@@ -82,14 +85,15 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
-                                              training_data_perturbed,
-                                              'reward')
+    sns.set_context('talk')
+    metric_vs_dropout = get_metric_vs_dropout(
+        runs, perturbations, training_data_perturbed, 'reward')
     n = config.model.NUM_HIDDEN_NEURALSYSTEM
     num_electrodes = get_num_electrodes(runs, perturbations, path, n)
-    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
-                                   test_metric_unperturbed, 'test_reward',
-                                   num_electrodes=num_electrodes)
+    plot_metric_vs_dropout_average(
+        metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
+        num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=False,
+        title=title)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 

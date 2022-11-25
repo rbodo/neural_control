@@ -17,7 +17,7 @@ from src.utils import get_data
 
 def main(experiment_id, experiment_name, tag_start_time):
     # Get path where experiment data has been saved.
-    log_path = get_log_path(experiment_name)
+    log_path = get_log_path(experiment_name, '~/Data/neural_control')
     path = os.path.join(log_path, 'mlruns', experiment_id)
 
     # Get all training runs.
@@ -47,7 +47,8 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
+                                  'B. LQG oracle (particle)')
 
     # Show metric vs times of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(runs, path)

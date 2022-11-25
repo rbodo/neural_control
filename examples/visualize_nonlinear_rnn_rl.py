@@ -17,7 +17,8 @@ from examples.visualize_linear_rnn_lqr import (
     get_training_data_unperturbed, plot_training_curve_unperturbed,
     get_training_data_perturbed, plot_training_curves_perturbed,
     get_metric_vs_dropout, plot_metric_vs_dropout, PALETTE,
-    plot_controller_effect, plot_metric_vs_dropout_average, PERTURBATIONS)
+    plot_controller_effect, plot_metric_vs_dropout_average, PERTURBATIONS,
+    draw_coordinate_system, draw_title)
 from src.ppo_recurrent import RecurrentPPO
 
 
@@ -50,10 +51,12 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
+    title = 'D. RL (pendulum)'
+
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
@@ -83,31 +86,27 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
-    metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
-                                              training_data_perturbed,
-                                              'reward')
-    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
-                                   test_metric_unperturbed, 'test_reward')
+    sns.set_context('talk')
+    metric_vs_dropout = get_metric_vs_dropout(
+        runs, perturbations, training_data_perturbed, 'reward')
+    plot_metric_vs_dropout_average(
+        metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
+        set_xlabels=True, set_col_labels=False, title=title)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
 
-def plot_trajectories_unperturbed(data: pd.DataFrame, path: str):
+def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
+                                  title: Optional[str] = None):
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
                     aspect=0.8, facet_kws={'sharex': True, 'sharey': True,
                                            'margin_titles': True})
 
-    # Draw coordinate system as inlet in first panel.
-    arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
-    g.axes[0, 0].annotate(
-        'Position', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(75, 0),
-        textcoords='offset points', verticalalignment='center',
-        arrowprops=arrowprops)
-    g.axes[0, 0].annotate(
-        'Velocity', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(0, 75),
-        textcoords='offset points', horizontalalignment='center',
-        arrowprops=arrowprops)
+    draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (0, 1))
+
+    if title is not None:
+        draw_title(g.axes[0, 0], title)
 
     # Same for angle and angular velocity (can't do it like this because it
     # overwrites previous plot):
@@ -148,16 +147,7 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
                     aspect=0.9, facet_kws={'sharex': False, 'sharey': True,
                                            'margin_titles': True})
 
-    # Draw coordinate system as inlet in first panel.
-    arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
-    g.axes[2, 0].annotate(
-        'Position', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(75, 0),
-        textcoords='offset points', verticalalignment='center',
-        arrowprops=arrowprops)
-    g.axes[2, 0].annotate(
-        'Velocity', xy=(0.11, 0.1), xycoords='axes fraction', xytext=(0, 75),
-        textcoords='offset points', horizontalalignment='center',
-        arrowprops=arrowprops)
+    draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (2, 0))
 
     get_legend_with_rewards(g)
 
@@ -170,8 +160,9 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g.axes[2, 0].set_xticklabels(['low'])
     g.axes[2, 4].set_xticks([g.axes[2, 4].get_xlim()[-1] * 0.9])
     g.axes[2, 4].set_xticklabels(['high'])
+    enums = ['A. ', 'B. ', 'C. ']
     for i, ylabel in enumerate(PERTURBATIONS.values()):
-        g.axes[i, 0].set_ylabel(ylabel, rotation=0, ha='right')
+        draw_title(g.axes[i, 0], enums[i] + ylabel)
     g.despine(left=False, bottom=False, top=False, right=False)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0.1)
@@ -192,13 +183,13 @@ def get_trajectories_unperturbed(
         environment_states, _ = run_single(environment, model_trained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN after training')
+                    controller='RNN after')
 
         # Get trajectories of untrained model.
         environment_states, _ = run_single(environment, model_untrained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN before training')
+                    controller='RNN before')
 
     return pd.DataFrame(data)
 
@@ -227,14 +218,14 @@ def get_trajectories_perturbed(
                 environment_states, _ = run_single(environment, model_trained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN after training', **kwargs)
+                            controller='RNN after', **kwargs)
 
                 # Get trajectories of untrained model.
                 environment_states, _ = run_single(environment,
                                                    model_untrained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN before training', **kwargs)
+                            controller='RNN before', **kwargs)
 
     return pd.DataFrame(data)
 
@@ -269,6 +260,7 @@ def get_legend_with_rewards(g: sns.FacetGrid):
             labels.append(label)
             lines.append(line)
         ax.legend(lines, labels, loc='best', frameon=False, ncol=1, title=None)
+    g.axes[0, 0].set_zorder(1)  # So the long legend is on top of other panels.
 
 
 if __name__ == '__main__':

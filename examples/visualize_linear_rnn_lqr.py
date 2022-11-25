@@ -21,7 +21,7 @@ from src.control_systems_mxnet import (StochasticLinearIOSystem,
 from src.utils import get_data
 
 sns.set_style('white')
-sns.set_context('talk')
+sns.set_context('poster')
 matplotlib.rc('axes', edgecolor='lightgrey')
 PALETTE = 'copper'
 PERTURBATIONS = OrderedDict({'sensor': 'Sensor', 'processor': 'Association',
@@ -61,10 +61,12 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
+    title = 'A. LQR direct (particle)'
+
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed, lqr_loss = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
 
     # Show metric vs times of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(
@@ -90,33 +92,30 @@ def main(experiment_id, experiment_name, tag_start_time):
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
+    sns.set_context('talk')
     metric_vs_dropout = get_metric_vs_dropout(runs, perturbations,
                                               training_data_perturbed)
     n = config.model.NUM_HIDDEN_NEURALSYSTEM
     num_electrodes = get_num_electrodes(runs, perturbations, path, n)
-    plot_metric_vs_dropout_average(metric_vs_dropout, log_path,
-                                   test_metric_unperturbed, logy=True,
-                                   num_electrodes=num_electrodes)
+    plot_metric_vs_dropout_average(
+        metric_vs_dropout, log_path, test_metric_unperturbed, logy=True,
+        num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=True,
+        title=title)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, logy=True)
 
 
-def plot_trajectories_unperturbed(data: pd.DataFrame, path: str):
+def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
+                                  title: Optional[str] = None):
     g = sns.relplot(data=data, x='x0', y='x1', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
                     aspect=0.8, facet_kws={'sharex': True, 'sharey': True,
                                            'margin_titles': True})
 
-    # Draw coordinate system as inlet in first panel.
-    arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
-    g.axes[0, 0].annotate(
-        'Position', xy=(-0.75, -0.75), xycoords='data', xytext=(75, 0),
-        textcoords='offset points', verticalalignment='center',
-        arrowprops=arrowprops)
-    g.axes[0, 0].annotate(
-        'Velocity', xy=(-0.75, -0.75), xycoords='data', xytext=(0, 75),
-        textcoords='offset points', horizontalalignment='center',
-        arrowprops=arrowprops)
+    draw_coordinate_system(g, (-0.65, -0.65), axis=(0, 1))
+
+    if title is not None:
+        draw_title(g.axes[0, 0], title)
 
     # Draw target state.
     xt = [0, 0]
@@ -132,6 +131,7 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str):
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0)
     g.axes[0, 0].legend(loc='best', frameon=False, ncol=1, title=None)
+    g.axes[0, 0].set_zorder(1)  # So the legend is on top of other panels.
     g.legend.remove()
     path_fig = os.path.join(path, 'trajectories_unperturbed')
     plt.savefig(path_fig, bbox_inches='tight')
@@ -145,16 +145,7 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
                     aspect=0.9, facet_kws={'sharex': False, 'sharey': True,
                                            'margin_titles': True})
 
-    # Draw coordinate system as inlet in first panel.
-    arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
-    g.axes[2, 0].annotate(
-        'Position', xy=(-0.75, -0.75), xycoords='data', xytext=(75, 0),
-        textcoords='offset points', verticalalignment='center',
-        arrowprops=arrowprops)
-    g.axes[2, 0].annotate(
-        'Velocity', xy=(-0.75, -0.75), xycoords='data', xytext=(0, 75),
-        textcoords='offset points', horizontalalignment='center',
-        arrowprops=arrowprops)
+    draw_coordinate_system(g, (-0.65, -0.65), axis=(2, 0))
 
     # Draw target state.
     xt = [0, 0]
@@ -171,13 +162,15 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g.axes[2, 0].set_xticklabels(['low'])
     g.axes[2, 4].set_xticks([g.axes[2, 4].get_xlim()[-1] * 0.9])
     g.axes[2, 4].set_xticklabels(['high'])
+    enums = ['A. ', 'B. ', 'C. ']
     for i, ylabel in enumerate(PERTURBATIONS.values()):
-        g.axes[i, 0].set_ylabel(ylabel, rotation=0, ha='right')
+        draw_title(g.axes[i, 0], enums[i] + ylabel)
     g.despine(left=False, bottom=False, top=False, right=False)
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0.1)
     g.legend.remove()
     g.axes[0, 0].legend(loc='best', ncol=1, title=None, frameon=False)
+    g.axes[0, 0].set_zorder(1)  # So the legend is on top of other panels.
     path_fig = os.path.join(path, 'trajectories_perturbed')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
@@ -222,7 +215,7 @@ def plot_training_curves_perturbed(
                                  (data.phase == 'test')]
     g = sns.relplot(data=data_full_control, x='time',
                     y='metric', col='perturbation_type',
-                    col_order=PERTURBATIONS.keys(),
+                    col_order=PERTURBATIONS.keys(), legend=False,
                     hue='perturbation_level', kind='line', palette=PALETTE,
                     facet_kws={'sharex': False, 'sharey': sharey})
 
@@ -272,7 +265,7 @@ def plot_controller_effect(
         g = sns.relplot(data=c, x='perturbation_level', y='metric',
                         row='perturbation_type', hue='trained', kind='line',
                         row_order=PERTURBATIONS.keys(), style='trained',
-                        palette=PALETTE, markers=True, height=4, aspect=1,
+                        palette=PALETTE, markers=True, height=5, aspect=1,
                         facet_kws={'sharex': False, 'sharey': sharey})
     else:
         raise NotImplementedError
@@ -312,6 +305,8 @@ def plot_controller_effect(
 def plot_metric_vs_dropout_average(
         data: pd.DataFrame, path: str, test_metric_unperturbed: float,
         metric: Optional[str] = 'test_loss', logy: Optional[bool] = False,
+        title: Optional[str] = None, set_xlabels: Optional[bool] = True,
+        set_col_labels: Optional[bool] = True,
         num_electrodes: Optional[pd.DataFrame] = None):
     ylabel = 'Reward' if metric == 'test_reward' else 'Loss'
     g = sns.relplot(data=data, x='gramian_value', y='metrics.' + metric,
@@ -344,19 +339,21 @@ def plot_metric_vs_dropout_average(
         g.set(yscale='log')
     g.set(xlim=[-0.05, 1.05])
     g.set_axis_labels('', ylabel)
-    for i, title in enumerate(PERTURBATIONS.values()):
-        ax = g.axes[0, i]
-        ax.set_title(title)
-        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0,
-                                                      symbol=''))
+    if set_xlabels:
+        for ax in g.axes[0]:
+            ax.set_xlabel('Electrode coverage [%]')
+            ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0,
+                                                          symbol=''))
+    for i, col_label in enumerate(PERTURBATIONS.values()):
+        g.axes[0, i].set_title(col_label if set_col_labels else None)
+    if title is not None:
+        draw_title(g.axes[0, 0], title, 0.1 if set_col_labels else 0)
     g.axes[0, 0].set(yticklabels=[])
     g.axes[0, 0].legend(g.axes[0, 0].lines[2:], ['stimulation', 'recording',
                                                  'unperturbed'], frameon=False)
     if g.legend is not None:
         g.legend.remove()
     g.despine(left=False, bottom=False, top=False, right=False)
-    for ax in g.axes[0]:
-        ax.set_xlabel('Electrode coverage [%]')
     path_fig = os.path.join(path, 'metric_vs_dropout_average')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
@@ -370,7 +367,7 @@ def plot_metric_vs_dropout(data: pd.DataFrame, path: str,
     g = sns.relplot(data=data, x='gramian_value', y='metrics.' + metric,
                     row='gramian_type', col='params.perturbation_type',
                     hue='params.perturbation_level', palette=PALETTE,
-                    col_order=PERTURBATIONS.keys(),
+                    col_order=PERTURBATIONS.keys(), legend=False,
                     kind='line', marker='o', markersize=10,
                     facet_kws={'sharex': False, 'sharey': True})
 
@@ -657,9 +654,10 @@ def get_runs_unperturbed(runs: pd.DataFrame) -> pd.DataFrame:
     return get_runs_perturbed(runs, '', 0)
 
 
-def get_log_path(experiment_name: str) -> str:
-    return os.path.expanduser(
-        f'~/Data/neural_control_snellius/{experiment_name}')
+def get_log_path(experiment_name: str, path: Optional[str] = None) -> str:
+    if path is None:
+        path = '~/Data/neural_control_snellius'
+    return os.path.expanduser(os.path.join(path, experiment_name))
 
 
 def add_training_curve(data: dict, path: str, run_id: str, phase: str,
@@ -687,6 +685,25 @@ def add_states_mx(data: dict, states: mx.nd.NDArray):
 def add_states(data: dict, states: np.ndarray):
     data['x0'] += states[:, 0, 0].tolist()
     data['x1'] += states[:, 0, 1].tolist()
+
+
+def draw_coordinate_system(g: sns.FacetGrid, xy: Tuple[float, float],
+                           xycoords: Optional[str] = 'data',
+                           axis: Optional[Tuple[int, int]] = (0, 0)):
+    """Draw coordinate system as inlet in first panel."""
+    arrowprops = dict(arrowstyle='-', connectionstyle='arc3', fc='k', ec='k')
+    ax = g.axes[axis[0], axis[1]]
+    ax.annotate('Position', xy=xy, xycoords=xycoords, xytext=(50, 0),
+                textcoords='offset points', verticalalignment='center',
+                arrowprops=arrowprops)
+    ax.annotate('Velocity', xy=xy, xycoords=xycoords, xytext=(0, 50),
+                textcoords='offset points', horizontalalignment='center',
+                arrowprops=arrowprops)
+
+
+def draw_title(axis: plt.axis, title: str, yoffset: Optional[float] = 0):
+    axis.annotate(title, xy=(0.01, 1.01 + yoffset), xycoords='axes fraction',
+                  weight='bold')
 
 
 def draw_colorbar():
