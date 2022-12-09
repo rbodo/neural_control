@@ -51,12 +51,13 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
-    title = 'D. RL (pendulum)'
+    title = 'RL: Pendulum balancing'
 
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
+                                  '(d) ' + title)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
@@ -77,7 +78,8 @@ def main(experiment_id, experiment_name, tag_start_time):
                                    test_metric_unperturbed,
                                    ('Episode', 'Reward'), formatx=True)
     plot_controller_effect(training_data_perturbed, log_path,
-                           test_metric_unperturbed, ylabel='Reward')
+                           test_metric_unperturbed, ylabel='Reward',
+                           aspect=1.1)
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -91,7 +93,7 @@ def main(experiment_id, experiment_name, tag_start_time):
         runs, perturbations, training_data_perturbed, 'reward')
     plot_metric_vs_dropout_average(
         metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
-        set_xlabels=True, set_col_labels=False, title=title)
+        set_xlabels=True, set_col_labels=False, title='(b) ' + title)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 
@@ -100,7 +102,7 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
                                   title: Optional[str] = None):
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
-                    aspect=0.8, facet_kws={'sharex': True, 'sharey': True,
+                    aspect=0.9, facet_kws={'sharex': True, 'sharey': True,
                                            'margin_titles': True})
 
     draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (0, 1))
@@ -143,8 +145,8 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
 def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='perturbation_level', sort=False,
-                    palette=PALETTE, row='perturbation_type', height=4,
-                    aspect=0.9, facet_kws={'sharex': False, 'sharey': True,
+                    palette=PALETTE, row='perturbation_type', height=3.8,
+                    aspect=0.8, facet_kws={'sharex': False, 'sharey': True,
                                            'margin_titles': True})
 
     draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (2, 0))
@@ -160,7 +162,7 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g.axes[2, 0].set_xticklabels(['low'])
     g.axes[2, 4].set_xticks([g.axes[2, 4].get_xlim()[-1] * 0.9])
     g.axes[2, 4].set_xticklabels(['high'])
-    enums = ['A. ', 'B. ', 'C. ']
+    enums = ['(a) ', '(b) ', '(c) ']
     for i, ylabel in enumerate(PERTURBATIONS.values()):
         draw_title(g.axes[i, 0], enums[i] + ylabel)
     g.despine(left=False, bottom=False, top=False, right=False)

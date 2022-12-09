@@ -50,12 +50,13 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
-    title = 'C. RL (particle)'
+    title = 'RL: Particle stabilization'
 
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
+                                  '(c) ' + title)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
@@ -92,8 +93,8 @@ def main(experiment_id, experiment_name, tag_start_time):
     num_electrodes = get_num_electrodes(runs, perturbations, path, n)
     plot_metric_vs_dropout_average(
         metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
-        num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=False,
-        title=title)
+        num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=True,
+        title='(a) ' + title)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, 'test_reward')
 

@@ -346,8 +346,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
         num_steps = self.config.simulation.NUM_STEPS
         dt = T / num_steps
         return DI(num_inputs, num_outputs, num_states, self.device,
-                  process_noise,
-                  observation_noise, dt, prefix='environment_')
+                  process_noise, observation_noise, dt, prefix='environment_')
 
     def get_model(self, freeze_neuralsystem, freeze_controller,
                   environment: StochasticLinearIOSystem,

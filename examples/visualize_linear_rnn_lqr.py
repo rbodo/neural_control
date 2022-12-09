@@ -23,6 +23,7 @@ from src.utils import get_data
 sns.set_style('white')
 sns.set_context('poster')
 matplotlib.rc('axes', edgecolor='lightgrey')
+matplotlib.rc('savefig', format='png')  # svg or png
 PALETTE = 'copper'
 PERTURBATIONS = OrderedDict({'sensor': 'Sensor', 'processor': 'Association',
                              'actuator': 'Motor'})
@@ -61,12 +62,13 @@ def main(experiment_id, experiment_name, tag_start_time):
                                       path)
     pipeline.model = model_trained
 
-    title = 'A. LQR direct (particle)'
+    title = 'LQR direct: Particle stabilization'
 
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed, lqr_loss = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
+                                  '(a) ' + title)
 
     # Show metric vs times of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(
@@ -83,7 +85,7 @@ def main(experiment_id, experiment_name, tag_start_time):
     plot_training_curves_perturbed(training_data_perturbed, log_path,
                                    test_metric_unperturbed, logy=True)
     plot_controller_effect(training_data_perturbed, log_path,
-                           test_metric_unperturbed, logy=True)
+                           test_metric_unperturbed, logy=True, aspect=0.9)
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -99,8 +101,8 @@ def main(experiment_id, experiment_name, tag_start_time):
     num_electrodes = get_num_electrodes(runs, perturbations, path, n)
     plot_metric_vs_dropout_average(
         metric_vs_dropout, log_path, test_metric_unperturbed, logy=True,
-        num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=True,
-        title=title)
+        num_electrodes=num_electrodes, set_xlabels=True, set_col_labels=True,
+        title=None)
     plot_metric_vs_dropout(metric_vs_dropout, log_path,
                            test_metric_unperturbed, logy=True)
 
@@ -141,8 +143,8 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
 def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g = sns.relplot(data=data, x='x0', y='x1', kind='line', style='controller',
                     hue='controller', col='perturbation_level', sort=False,
-                    palette=PALETTE, row='perturbation_type', height=4,
-                    aspect=0.9, facet_kws={'sharex': False, 'sharey': True,
+                    palette=PALETTE, row='perturbation_type', height=3.8,
+                    aspect=0.8, facet_kws={'sharex': False, 'sharey': True,
                                            'margin_titles': True})
 
     draw_coordinate_system(g, (-0.65, -0.65), axis=(2, 0))
@@ -162,7 +164,7 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g.axes[2, 0].set_xticklabels(['low'])
     g.axes[2, 4].set_xticks([g.axes[2, 4].get_xlim()[-1] * 0.9])
     g.axes[2, 4].set_xticklabels(['high'])
-    enums = ['A. ', 'B. ', 'C. ']
+    enums = ['(a) ', '(b) ', '(c) ']
     for i, ylabel in enumerate(PERTURBATIONS.values()):
         draw_title(g.axes[i, 0], enums[i] + ylabel)
     g.despine(left=False, bottom=False, top=False, right=False)
@@ -180,10 +182,10 @@ def plot_training_curve_unperturbed(
         data: pd.DataFrame, path: str, lqr_loss: Optional[float] = None,
         axis_labels: Optional[Tuple[str, str]] = ('Epoch', 'Loss'),
         show_legend: Optional[bool] = True, logy: Optional[bool] = False,
-        formatx: Optional[bool] = False):
+        formatx: Optional[bool] = False, **plt_kwargs):
     g = sns.relplot(data=data, x='time', y='metric', style='phase',
                     style_order=['training', 'test'], hue='phase', kind='line',
-                    legend=show_legend, palette=PALETTE)
+                    legend=show_legend, palette=PALETTE, **plt_kwargs)
 
     # Draw LQR baseline.
     if lqr_loss is not None:
@@ -242,7 +244,8 @@ def plot_controller_effect(
         data: pd.DataFrame, path: str, test_metric_unperturbed: float,
         ylabel: Optional[str] = 'Loss', logy: Optional[bool] = False,
         formatx: Optional[bool] = False, sharey: Optional[bool] = True,
-        remove_ticks: Optional[bool] = True, kind: Optional[str] = 'line'):
+        remove_ticks: Optional[bool] = True, kind: Optional[str] = 'line',
+        aspect: Optional[float] = 1):
     # Get test curves corresponding to full controllability and observability.
     data_full_control = data.loc[(data.dropout_probability == 0) &
                                  (data.phase == 'test')]
@@ -265,7 +268,7 @@ def plot_controller_effect(
         g = sns.relplot(data=c, x='perturbation_level', y='metric',
                         row='perturbation_type', hue='trained', kind='line',
                         row_order=PERTURBATIONS.keys(), style='trained',
-                        palette=PALETTE, markers=True, height=5, aspect=1,
+                        palette=PALETTE, markers=True, height=4, aspect=aspect,
                         facet_kws={'sharex': False, 'sharey': sharey})
     else:
         raise NotImplementedError
@@ -339,6 +342,7 @@ def plot_metric_vs_dropout_average(
         g.set(yscale='log')
     g.set(xlim=[-0.05, 1.05])
     g.set_axis_labels('', ylabel)
+    g.set(xticklabels=[])
     if set_xlabels:
         for ax in g.axes[0]:
             ax.set_xlabel('Electrode coverage [%]')
