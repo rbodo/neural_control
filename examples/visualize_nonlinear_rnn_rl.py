@@ -15,10 +15,9 @@ from examples.visualize_linear_rnn_lqr import (
     add_scalars, get_runs_perturbed, get_runs_unperturbed, get_runs_all,
     get_log_path, get_model_trained, get_model_unperturbed_untrained,
     get_training_data_unperturbed, plot_training_curve_unperturbed,
-    get_training_data_perturbed, plot_training_curves_perturbed,
-    get_metric_vs_dropout, plot_metric_vs_dropout, PALETTE,
+    get_training_data_perturbed, get_metric_vs_dropout, PALETTE,
     plot_controller_effect, plot_metric_vs_dropout_average, PERTURBATIONS,
-    draw_coordinate_system, draw_title)
+    draw_coordinate_system, draw_title, draw_legend)
 from src.ppo_recurrent import RecurrentPPO
 
 
@@ -56,16 +55,16 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
-                                  '(d) ' + title)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title,
+                                  show_legend=False, show_coordinates=False)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
     training_data_unperturbed = get_training_data_unperturbed(
         runs_unperturbed, path, 'reward', eval_every_n)
-    plot_training_curve_unperturbed(training_data_unperturbed, log_path,
-                                    axis_labels=('Episode', 'Reward'),
-                                    formatx=True)
+    plot_training_curve_unperturbed(
+        training_data_unperturbed, log_path, axis_labels=('Episode', 'Reward'),
+        formatx=True, show_legend=False, height=3.8)
 
     # Show metric vs times of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
@@ -74,17 +73,18 @@ def main(experiment_id, experiment_name, tag_start_time):
         runs, perturbations, dropout_probabilities, path, 'reward',
         eval_every_n)
     test_metric_unperturbed = runs_unperturbed['metrics.test_reward'].mean()
-    plot_training_curves_perturbed(training_data_perturbed, log_path,
-                                   test_metric_unperturbed,
-                                   ('Episode', 'Reward'), formatx=True)
+    # plot_training_curves_perturbed(training_data_perturbed, log_path,
+    #                                test_metric_unperturbed,
+    #                                ('Episode', 'Reward'), formatx=True)
     plot_controller_effect(training_data_perturbed, log_path,
                            test_metric_unperturbed, ylabel='Reward',
-                           aspect=1.1)
+                           aspect=1.5)
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
         [0], environment, path, perturbations, pipeline, runs)
-    plot_trajectories_perturbed(trajectories_perturbed, log_path)
+    plot_trajectories_perturbed(trajectories_perturbed, log_path,
+                                show_coordinates=True)
 
     # Show final test metric of perturbed controlled system for varying degrees
     # of controllability and observability.
@@ -93,19 +93,23 @@ def main(experiment_id, experiment_name, tag_start_time):
         runs, perturbations, training_data_perturbed, 'reward')
     plot_metric_vs_dropout_average(
         metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
-        set_xlabels=True, set_col_labels=False, title='(b) ' + title)
-    plot_metric_vs_dropout(metric_vs_dropout, log_path,
-                           test_metric_unperturbed, 'test_reward')
+        set_xlabels=True, set_col_labels=False, title=title, show_legend=False)
+    # plot_metric_vs_dropout(metric_vs_dropout, log_path,
+    #                        test_metric_unperturbed, 'test_reward')
 
 
 def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
-                                  title: Optional[str] = None):
+                                  title: Optional[str] = None,
+                                  show_legend: Optional[bool] = True,
+                                  show_coordinates: Optional[bool] = True):
+    print("Trajectories unperturbed.")
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
-                    aspect=0.9, facet_kws={'sharex': True, 'sharey': True,
-                                           'margin_titles': True})
+                    legend=show_legend, aspect=0.8, facet_kws={
+                        'sharex': True, 'sharey': True, 'margin_titles': True})
 
-    draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (0, 1))
+    if show_coordinates:
+        draw_coordinate_system(g)
 
     if title is not None:
         draw_title(g.axes[0, 0], title)
@@ -128,30 +132,42 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
     #     textcoords='offset points', horizontalalignment='center',
     #     arrowprops=arrowprops)
 
-    get_legend_with_rewards(g)
+    if show_legend:
+        draw_legend(g, 2)
+    draw_rewards(g)
 
     g.set(xticklabels=[], yticklabels=[])
     g.set_axis_labels('', '')
     g.set_titles(col_template='',  # 'Test sample {col_name}'
                  row_template='')
     g.despine(left=False, bottom=False, top=False, right=False)
-    plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0)
     path_fig = os.path.join(path, 'trajectories_unperturbed')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
 
 
-def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
+def plot_trajectories_perturbed(data: pd.DataFrame, path: str,
+                                show_coordinates: Optional[bool] = True):
+    print("Trajectories perturbed.")
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='perturbation_level', sort=False,
                     palette=PALETTE, row='perturbation_type', height=3.8,
-                    aspect=0.8, facet_kws={'sharex': False, 'sharey': True,
-                                           'margin_titles': True})
+                    legend=True, aspect=0.8,
+                    facet_kws={'sharex': False, 'sharey': True,
+                               'margin_titles': True})
 
-    draw_coordinate_system(g, (0.15, 0.1), 'axes fraction', (2, 0))
+    if show_coordinates:
+        draw_coordinate_system(g, axis=(0, 4))
 
-    get_legend_with_rewards(g)
+    legend = g.axes[0, 0].legend()
+    lines = legend.get_lines()
+    labels = [t.get_text().capitalize() for t in legend.texts]
+    legend.remove()
+    sns.move_legend(obj=g, loc='lower left', handles=lines, labels=labels,
+                    frameon=False, ncol=1, title=None,
+                    bbox_to_anchor=(0.35, 0.85))
+    draw_rewards(g)
 
     g.set(xticklabels=[], yticklabels=[])
     g.set_axis_labels('', '')
@@ -162,12 +178,10 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str):
     g.axes[2, 0].set_xticklabels(['low'])
     g.axes[2, 4].set_xticks([g.axes[2, 4].get_xlim()[-1] * 0.9])
     g.axes[2, 4].set_xticklabels(['high'])
-    enums = ['(a) ', '(b) ', '(c) ']
     for i, ylabel in enumerate(PERTURBATIONS.values()):
-        draw_title(g.axes[i, 0], enums[i] + ylabel)
+        draw_title(g.axes[i, 0], ylabel)
     g.despine(left=False, bottom=False, top=False, right=False)
-    plt.tight_layout()
-    plt.subplots_adjust(wspace=0, hspace=0.1)
+    plt.subplots_adjust(wspace=0, hspace=0.2)
     path_fig = os.path.join(path, 'trajectories_perturbed')
     plt.savefig(path_fig, bbox_inches='tight')
     plt.show()
@@ -185,13 +199,13 @@ def get_trajectories_unperturbed(
         environment_states, _ = run_single(environment, model_trained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN after')
+                    controller='Neural system')
 
         # Get trajectories of untrained model.
         environment_states, _ = run_single(environment, model_untrained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN before')
+                    controller='No control')
 
     return pd.DataFrame(data)
 
@@ -220,14 +234,14 @@ def get_trajectories_perturbed(
                 environment_states, _ = run_single(environment, model_trained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN after', **kwargs)
+                            controller='Prosthesis on', **kwargs)
 
                 # Get trajectories of untrained model.
                 environment_states, _ = run_single(environment,
                                                    model_untrained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN before', **kwargs)
+                            controller='Prosthesis off', **kwargs)
 
     return pd.DataFrame(data)
 
@@ -248,21 +262,15 @@ def add_states(data: dict, states: np.ndarray):
     data['x3'] += states[:, 0, 3].tolist()
 
 
-def get_legend_with_rewards(g: sns.FacetGrid):
-    g.legend.remove()
-    texts = g.axes[0, 0].legend().texts
+def draw_rewards(g: sns.FacetGrid):
     for i, ax in enumerate(g.axes.flat):
         lines = []
         labels = []
         for j, line in enumerate(ax.get_lines()[:2]):
             reward = len(line.get_xdata())
-            label = f'r={reward}'
-            if i == 0:
-                label = texts[j].get_text() + ', ' + label
-            labels.append(label)
+            labels.append(str(reward))
             lines.append(line)
         ax.legend(lines, labels, loc='best', frameon=False, ncol=1, title=None)
-    g.axes[0, 0].set_zorder(1)  # So the long legend is on top of other panels.
 
 
 if __name__ == '__main__':

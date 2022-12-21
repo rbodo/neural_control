@@ -48,12 +48,14 @@ def main(experiment_id, experiment_name, tag_start_time):
     trajectories_unperturbed = get_trajectories_unperturbed(
         data_test, model_trained, model_untrained, pipeline)
     plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
-                                  'B. LQG oracle (particle)')
+                                  'LQG oracle: Particle stabilization',
+                                  show_legend=False, show_coordinates=False)
 
     # Show metric vs times of unperturbed model.
     training_data_unperturbed = get_training_data_unperturbed(runs, path)
-    plot_training_curve_unperturbed(training_data_unperturbed, log_path,
-                                    logy=True)
+    plot_training_curve_unperturbed(
+        training_data_unperturbed, log_path, logy=True, show_legend=False,
+        height=3.8)
 
 
 def get_trajectories_unperturbed(
@@ -80,17 +82,18 @@ def get_trajectories_unperturbed(
         _, environment_states = model_trained(x_init)
         add_states_mx(data, environment_states)
         add_scalars(data, num_steps, index=test_index,
-                    controller='RNN after training')
+                    controller='Prosthesis trained')
 
         # Get trajectories of untrained model.
         _, environment_states = model_untrained(x_init)
         add_states_mx(data, environment_states)
         add_scalars(data, num_steps, index=test_index,
-                    controller='RNN before training')
+                    controller='Prosthesis random')
 
         # Store LQG trajectory.
         add_states_mx(data, lqr_states)
-        add_scalars(data, num_steps, index=test_index, controller='LQG')
+        add_scalars(data, num_steps, index=test_index,
+                    controller='Optimal controller')
     return pd.DataFrame(data)
 
 

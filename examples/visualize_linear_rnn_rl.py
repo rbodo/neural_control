@@ -12,10 +12,9 @@ from examples.linear_rnn_rl import LinearRlPipeline, run_single
 from examples.visualize_linear_rnn_lqr import (
     add_scalars, get_runs_perturbed, get_runs_unperturbed,
     get_runs_all, get_log_path, plot_trajectories_unperturbed,
-    plot_trajectories_perturbed, plot_metric_vs_dropout, add_states,
-    get_training_data_perturbed, get_training_data_unperturbed,
-    get_model_trained, get_metric_vs_dropout, get_model_unperturbed_untrained,
-    plot_training_curve_unperturbed, plot_training_curves_perturbed,
+    plot_trajectories_perturbed, add_states, get_training_data_perturbed,
+    get_training_data_unperturbed, get_model_trained, get_metric_vs_dropout,
+    get_model_unperturbed_untrained, plot_training_curve_unperturbed,
     plot_controller_effect, get_num_electrodes, plot_metric_vs_dropout_average)
 from src.control_systems import DiGym
 from src.ppo_recurrent import RecurrentPPO
@@ -55,16 +54,16 @@ def main(experiment_id, experiment_name, tag_start_time):
     # Show example trajectories of unperturbed model before and after training.
     trajectories_unperturbed = get_trajectories_unperturbed(
         model_trained, model_untrained, environment)
-    plot_trajectories_unperturbed(trajectories_unperturbed, log_path,
-                                  '(c) ' + title)
+    plot_trajectories_unperturbed(trajectories_unperturbed, log_path, title,
+                                  show_legend=False, show_coordinates=False)
 
     # Show metric vs times of unperturbed model.
     eval_every_n = 5000
     training_data_unperturbed = get_training_data_unperturbed(
         runs_unperturbed, path, 'reward', eval_every_n)
-    plot_training_curve_unperturbed(training_data_unperturbed, log_path,
-                                    axis_labels=('Episode', 'Reward'),
-                                    formatx=True)
+    plot_training_curve_unperturbed(
+        training_data_unperturbed, log_path, axis_labels=('Episode', 'Reward'),
+        formatx=True, show_legend=False, height=3.8)
 
     # Show metric vs times of perturbed models.
     perturbations = dict(config.perturbation.PERTURBATIONS)
@@ -73,11 +72,12 @@ def main(experiment_id, experiment_name, tag_start_time):
         runs, perturbations, dropout_probabilities, path, 'reward',
         eval_every_n)
     test_metric_unperturbed = runs_unperturbed['metrics.test_reward'].mean()
-    plot_training_curves_perturbed(training_data_perturbed, log_path,
-                                   test_metric_unperturbed,
-                                   ('Episode', 'Reward'), formatx=True)
+    # plot_training_curves_perturbed(training_data_perturbed, log_path,
+    #                                test_metric_unperturbed,
+    #                                ('Episode', 'Reward'), formatx=True)
     plot_controller_effect(training_data_perturbed, log_path,
-                           test_metric_unperturbed, ylabel='Reward')
+                           test_metric_unperturbed, ylabel='Reward',
+                           aspect=1.4)
 
     # Show example trajectories of perturbed model before and after training.
     trajectories_perturbed = get_trajectories_perturbed(
@@ -94,9 +94,9 @@ def main(experiment_id, experiment_name, tag_start_time):
     plot_metric_vs_dropout_average(
         metric_vs_dropout, log_path, test_metric_unperturbed, 'test_reward',
         num_electrodes=num_electrodes, set_xlabels=False, set_col_labels=True,
-        title='(a) ' + title)
-    plot_metric_vs_dropout(metric_vs_dropout, log_path,
-                           test_metric_unperturbed, 'test_reward')
+        title=title)
+    # plot_metric_vs_dropout(metric_vs_dropout, log_path,
+    #                        test_metric_unperturbed, 'test_reward')
 
 
 def get_trajectories_unperturbed(
@@ -110,13 +110,13 @@ def get_trajectories_unperturbed(
         environment_states, _ = run_single(environment, model_trained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN after training')
+                    controller='Neural system trained')
 
         # Get trajectories of untrained model.
         environment_states, _ = run_single(environment, model_untrained)
         add_states(data, environment_states)
         add_scalars(data, len(environment_states), index=test_index,
-                    controller='RNN before training')
+                    controller='Neural system')
 
     return pd.DataFrame(data)
 
@@ -145,14 +145,14 @@ def get_trajectories_perturbed(
                 environment_states, _ = run_single(environment, model_trained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN after training', **kwargs)
+                            controller='Prosthesis on', **kwargs)
 
                 # Get trajectories of untrained model.
                 environment_states, _ = run_single(environment,
                                                    model_untrained)
                 add_states(data, environment_states)
                 add_scalars(data, len(environment_states),
-                            controller='RNN before training', **kwargs)
+                            controller='Prosthesis off', **kwargs)
 
     return pd.DataFrame(data)
 
