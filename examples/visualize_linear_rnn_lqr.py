@@ -1,9 +1,6 @@
 import os
 import sys
 from collections import OrderedDict
-
-import matplotlib
-from matplotlib.ticker import PercentFormatter
 from typing import Tuple, List, Optional
 
 import mlflow
@@ -11,6 +8,8 @@ import numpy as np
 import mxnet as mx
 import pandas as pd
 import seaborn as sns
+import matplotlib
+from matplotlib.ticker import PercentFormatter
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 
@@ -23,10 +22,28 @@ from src.utils import get_data
 sns.set_style('white')
 sns.set_context('poster')
 matplotlib.rc('axes', edgecolor='lightgrey')
-matplotlib.rc('savefig', format='png')  # svg or png
-PALETTE = 'copper'
+matplotlib.rc('savefig', dpi=300, format='jpg')  # svg or png
+matplotlib.use('agg')
 PERTURBATIONS = OrderedDict({'sensor': 'Sensory', 'processor': 'Association',
                              'actuator': 'Motor'})
+
+
+def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
+    # new_cmap = colors.LinearSegmentedColormap.from_list(
+    #     'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+    #     cmap(np.linspace(minval, maxval, n)))
+    # return new_cmap
+    return cmap(np.linspace(minval, maxval, n))
+
+
+# PALETTE = truncate_colormap(plt.get_cmap('bone'), 0.2, 0.5, 3)
+# PALETTE = truncate_colormap(plt.get_cmap('copper_r'), 0.3, 1, 3)
+# PALETTE = truncate_colormap(plt.get_cmap('cividis'), 0.0, 0.3, 3)
+PALETTE = sns.color_palette('dark', 3)
+
+
+LINEWIDTH = 3
+ALPHA = 0.5
 
 
 def main(experiment_id, experiment_name, tag_start_time):
@@ -114,7 +131,8 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
     print("Trajectories unperturbed.")
     g = sns.relplot(data=data, x='x0', y='x1', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
-                    legend=show_legend, aspect=0.8, facet_kws={
+                    legend=show_legend, aspect=0.8, alpha=ALPHA,
+                    linewidth=LINEWIDTH, facet_kws={
                         'sharex': True, 'sharey': True, 'margin_titles': True})
 
     if show_coordinates:
@@ -150,9 +168,10 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str,
     g = sns.relplot(data=data, x='x0', y='x1', kind='line', style='controller',
                     hue='controller', col='perturbation_level', sort=False,
                     palette=PALETTE, row='perturbation_type', height=3.8,
-                    legend=show_legend, aspect=0.8,
-                    facet_kws={'sharex': False, 'sharey': True,
-                               'margin_titles': True})
+                    legend=show_legend, aspect=0.8, alpha=ALPHA,
+                    linewidth=LINEWIDTH, facet_kws={
+                        'sharex': False, 'sharey': True,
+                        'margin_titles': True})
 
     if show_coordinates:
         draw_coordinate_system(g, axis=(0, 4))
@@ -192,12 +211,13 @@ def plot_training_curve_unperturbed(
     print("Training curve unperturbed.")
     g = sns.relplot(data=data, x='time', y='metric', style='phase',
                     style_order=['training', 'test'], hue='phase', kind='line',
-                    legend=show_legend, palette=PALETTE, **plt_kwargs)
+                    legend=show_legend, palette=PALETTE, alpha=ALPHA,
+                    linewidth=LINEWIDTH, **plt_kwargs)
 
     # Draw LQR baseline.
     if lqr_loss is not None:
-        g.refline(y=lqr_loss, color='k', linestyle=':',
-                  label='Optimal control')
+        g.refline(y=lqr_loss, linestyle=':', label='Optimal control',
+                  color=PALETTE[-1], alpha=ALPHA)
     if logy:
         g.set(yscale='log')
     g.set_axis_labels(*axis_labels)
@@ -226,10 +246,12 @@ def plot_training_curves_perturbed(
                     y='metric', col='perturbation_type',
                     col_order=PERTURBATIONS.keys(), legend=False,
                     hue='perturbation_level', kind='line', palette=PALETTE,
+                    alpha=ALPHA, linewidth=LINEWIDTH,
                     facet_kws={'sharex': False, 'sharey': sharey})
 
     # Draw unperturbed baseline.
-    g.refline(y=test_metric_unperturbed, color='k', linestyle=':')
+    g.refline(y=test_metric_unperturbed, linestyle=':', color=PALETTE[-1],
+              alpha=ALPHA)
 
     g.set_axis_labels(*axis_labels)
     if logy:
@@ -278,8 +300,8 @@ def plot_controller_effect(
                         row='perturbation_type', hue='trained', kind='line',
                         row_order=PERTURBATIONS.keys(), style='trained',
                         palette=PALETTE, markers=True, height=3.8,
-                        aspect=aspect, facet_kws={'sharex': False,
-                                                  'sharey': sharey})
+                        aspect=aspect, alpha=ALPHA, linewidth=LINEWIDTH,
+                        facet_kws={'sharex': False, 'sharey': sharey})
     else:
         raise NotImplementedError
 
@@ -292,8 +314,8 @@ def plot_controller_effect(
     for i, title in enumerate(PERTURBATIONS.values()):
         ax = g.axes[i, 0]
         # Draw unperturbed baseline.
-        ax.hlines(test_metric_unperturbed, *ax.get_xlim(), color='k',
-                  linestyle=':', label='Unperturbed')
+        ax.hlines(test_metric_unperturbed, *ax.get_xlim(), color=PALETTE[-1],
+                  linestyle=':', label='Unperturbed', alpha=ALPHA)
         ax.set_title('')
         if remove_ticks:
             ax.set_xticks([])
@@ -324,13 +346,13 @@ def plot_metric_vs_dropout_average(
     ylabel = 'Reward' if metric == 'test_reward' else 'Loss'
     g = sns.relplot(data=data, x='gramian_value', y='metrics.' + metric,
                     style='gramian_type', col='params.perturbation_type',
-                    hue='gramian_type', palette=PALETTE,
-                    col_order=PERTURBATIONS.keys(), kind='line',
-                    facet_kws={'sharex': True, 'sharey': True})
+                    hue='gramian_type', palette=PALETTE, alpha=ALPHA,
+                    linewidth=LINEWIDTH, col_order=PERTURBATIONS.keys(),
+                    kind='line', facet_kws={'sharex': True, 'sharey': True})
 
     # Draw unperturbed baseline.
-    g.refline(y=test_metric_unperturbed, color='k', linestyle=':',
-              label='unperturbed')
+    g.refline(y=test_metric_unperturbed, linestyle=':', label='unperturbed',
+              color=PALETTE[-1], alpha=ALPHA)
 
     # Draw electrode number to achieve a certain energy in eigenspectrum.
     if num_electrodes is not None:
@@ -341,12 +363,14 @@ def plot_metric_vs_dropout_average(
             ax = g.axes[0, i]
             ax.annotate('', xy=(n_c, 0.05), xytext=(n_c, -0.05),
                         xycoords='axes fraction',
-                        arrowprops=dict(color=ax.lines[0].get_color(),
-                                        linestyle=ax.lines[0].get_linestyle()))
+                        arrowprops=dict(facecolor=ax.lines[0].get_color(),
+                                        linestyle=ax.lines[0].get_linestyle(),
+                                        edgecolor=(1, 1, 1, 0), alpha=ALPHA))
             ax.annotate('', xy=(n_o, 0.05), xytext=(n_o, -0.05),
                         xycoords='axes fraction',
-                        arrowprops=dict(color=ax.lines[1].get_color(),
-                                        linestyle=ax.lines[1].get_linestyle()))
+                        arrowprops=dict(facecolor=ax.lines[1].get_color(),
+                                        linestyle=ax.lines[1].get_linestyle(),
+                                        edgecolor=(1, 1, 1, 0), alpha=ALPHA))
 
     if logy:
         g.set(yscale='log')
@@ -364,9 +388,11 @@ def plot_metric_vs_dropout_average(
         draw_title(g.axes[0, 0], title, 0.1 if set_col_labels else 0)
     g.axes[0, 0].set(yticklabels=[])
     if show_legend:
-        g.axes[0, 0].legend(g.axes[0, 0].lines[2:],
-                            ['Stimulation', 'Recording', 'Unperturbed'],
-                            frameon=False)
+        legend = g.axes[0, 0].legend(
+            g.axes[0, 0].lines[2:],
+            ['Stimulation', 'Recording', 'Unperturbed'], frameon=False)
+        for line in legend.get_lines():
+            line.set_alpha(ALPHA)
     if g.legend is not None:
         g.legend.remove()
     g.despine(left=False, bottom=False, top=False, right=False)
@@ -384,11 +410,13 @@ def plot_metric_vs_dropout(data: pd.DataFrame, path: str,
                     row='gramian_type', col='params.perturbation_type',
                     hue='params.perturbation_level', palette=PALETTE,
                     col_order=PERTURBATIONS.keys(), legend=False,
-                    kind='line', marker='o', markersize=10,
-                    facet_kws={'sharex': False, 'sharey': True})
+                    kind='line', marker='o', markersize=10, alpha=ALPHA,
+                    linewidth=LINEWIDTH, facet_kws={'sharex': False,
+                                                    'sharey': True})
 
     # Draw unperturbed baseline.
-    g.refline(y=test_metric_unperturbed, color='k', linestyle=':')
+    g.refline(y=test_metric_unperturbed, linestyle=':', color=PALETTE[-1],
+              alpha=ALPHA)
 
     if logy:
         g.set(yscale='log')
@@ -727,6 +755,8 @@ def draw_title(axis: plt.axis, title: str, yoffset: Optional[float] = 0):
 def draw_legend(g: sns.FacetGrid, i: int = 0, xoffset: float = 0):
     legend = g.axes[0, 0].legend()
     lines = legend.get_lines()
+    for line in lines:
+        line.set_alpha(ALPHA)
     labels = [t.get_text().capitalize() for t in legend.texts]
     legend.remove()
     g.axes[0, i].legend(lines, labels, loc='lower left', frameon=False, ncol=1,

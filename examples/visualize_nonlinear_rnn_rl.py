@@ -17,7 +17,7 @@ from examples.visualize_linear_rnn_lqr import (
     get_training_data_unperturbed, plot_training_curve_unperturbed,
     get_training_data_perturbed, get_metric_vs_dropout, PALETTE,
     plot_controller_effect, plot_metric_vs_dropout_average, PERTURBATIONS,
-    draw_coordinate_system, draw_title, draw_legend)
+    draw_coordinate_system, draw_title, draw_legend, ALPHA, LINEWIDTH)
 from src.ppo_recurrent import RecurrentPPO
 
 
@@ -105,7 +105,8 @@ def plot_trajectories_unperturbed(data: pd.DataFrame, path: str,
     print("Trajectories unperturbed.")
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='index', sort=False, palette=PALETTE,
-                    legend=show_legend, aspect=0.8, facet_kws={
+                    legend=show_legend, aspect=0.8, alpha=ALPHA,
+                    linewidth=LINEWIDTH, facet_kws={
                         'sharex': True, 'sharey': True, 'margin_titles': True})
 
     if show_coordinates:
@@ -153,7 +154,7 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str,
     g = sns.relplot(data=data, x='x0', y='x2', kind='line', style='controller',
                     hue='controller', col='perturbation_level', sort=False,
                     palette=PALETTE, row='perturbation_type', height=3.8,
-                    legend=True, aspect=0.8,
+                    legend=True, aspect=0.8, alpha=ALPHA, linewidth=LINEWIDTH,
                     facet_kws={'sharex': False, 'sharey': True,
                                'margin_titles': True})
 
@@ -162,6 +163,8 @@ def plot_trajectories_perturbed(data: pd.DataFrame, path: str,
 
     legend = g.axes[0, 0].legend()
     lines = legend.get_lines()
+    for line in lines:
+        line.set_alpha(ALPHA)
     labels = [t.get_text().capitalize() for t in legend.texts]
     legend.remove()
     sns.move_legend(obj=g, loc='lower left', handles=lines, labels=labels,
