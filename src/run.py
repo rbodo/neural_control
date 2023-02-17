@@ -17,8 +17,7 @@ experiment_name = args.experiment_name
 os.environ['MLFLOW_TRACKING_URI'] = 'file:' + os.path.expanduser(
     f'~/Data/neural_control/{experiment_name}/mlruns')
 
-mlflow.run('https://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@github.com/rbodo/'
-           'neural_control.git',
+mlflow.run('https://github.com/rbodo/neural_control.git',
            entry_point=f'examples/{experiment_name}.py',
            parameters={'sweep_id': args.sweep_id,
                        'resume_experiment': args.resume_experiment},
