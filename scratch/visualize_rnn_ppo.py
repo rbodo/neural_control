@@ -2,7 +2,7 @@ import sys
 import os
 
 import numpy as np
-from gym.wrappers import TimeLimit
+from gymnasium.wrappers import TimeLimit
 from tqdm.contrib import tzip
 from yacs.config import CfgNode
 

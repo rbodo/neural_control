@@ -4,8 +4,8 @@ from typing import Union, Optional
 
 import control
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 
 from src.utils import (get_lqr_cost, get_initial_states,
                        get_additive_white_gaussian_noise)

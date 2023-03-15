@@ -1,7 +1,7 @@
 import os
 import sys
 
-from gym.wrappers import TimeLimit
+from gymnasium.wrappers import TimeLimit
 from typing import List, Union, Optional
 
 import pandas as pd

@@ -216,8 +216,8 @@ def select_noise_subset(data: pd.DataFrame, process_noises: Iterable[float],
     mask = False
     for process_noise, observation_noise in product(process_noises,
                                                     observation_noises):
-        mask |= ((data['process_noise'] == process_noise) &
-                 (data['observation_noise'] == observation_noise))
+        mask |= (np.isclose(data['process_noise'], process_noise) &
+                 np.isclose(data['observation_noise'], observation_noise))
     return data[mask]
 
 

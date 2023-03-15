@@ -15,8 +15,8 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional, Type, Union, Tuple, NamedTuple, \
     Generator, TypeVar
 
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import torch as th
 from sb3_contrib.common.recurrent.type_aliases import \

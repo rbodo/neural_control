@@ -6,7 +6,7 @@ import warnings
 
 import mlflow
 import numpy as np
-from gym.wrappers import TimeLimit
+from gymnasium.wrappers import TimeLimit
 import optuna
 from optuna.exceptions import ExperimentalWarning
 from optuna.integration.mlflow import MLflowCallback, RUN_ID_ATTRIBUTE_KEY

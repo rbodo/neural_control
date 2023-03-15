@@ -3,7 +3,7 @@ import os
 import sys
 from typing import Optional, Tuple
 
-import gym
+import gymnasium as gym
 import mlflow
 import numpy as np
 import matplotlib

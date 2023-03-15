@@ -3,8 +3,8 @@ import os
 from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator
 
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import torch
 from torch import nn
 from yacs.config import CfgNode
@@ -362,7 +362,8 @@ class DiGym(gym.Env):
     def get_cost(self, x: np.ndarray, u: np.ndarray) -> float:
         return get_lqr_cost(x[0, 0], u, self.Q, self.R, self.dt)
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, dict]:
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool,
+                                                dict]:
         action_tensor = astensor(action, **self.tkwargs)
         self._states = self.process.step(self._states, action_tensor)
         torch.clip(self._states, self.min, self.max, out=self._states)
@@ -374,16 +375,16 @@ class DiGym(gym.Env):
         self.cost = self.get_cost(x, action)
 
         # Use full state to determine whether agent succeeded.
-        done = self.is_done(self.states, action)
+        terminated = self.is_done(self.states, action)
 
         # Reward consists of negative LQR cost plus a bonus when reaching the
         # target in state space. This bonus decays over time to encourage fast
         # termination.
-        reward = -self.cost + done * 10 * np.exp(-self.t / 4)
+        reward = -self.cost + terminated * 10 * np.exp(-self.t / 4)
 
         self.t += self.dt
 
-        return observation, reward, done, {}
+        return observation, reward, terminated, False, {}
 
     def is_done(self, x: np.ndarray, u: np.ndarray) -> bool:
         cost = get_lqr_cost(x[0, 0], u, self.Q_states, self.R, self.dt)
@@ -392,7 +393,9 @@ class DiGym(gym.Env):
     def begin_state(self) -> np.ndarray:
         return self.init_state_space.sample()
 
-    def reset(self) -> np.ndarray:
+    def reset(self, seed=None, options=None) -> Tuple[np.ndarray, dict]:
+        super().reset(seed=seed)
+
         self._states = astensor(self.begin_state(), **self.tkwargs)
         action = torch.zeros(self.process.num_outputs, **self.tkwargs)
 
@@ -403,7 +406,7 @@ class DiGym(gym.Env):
         x = observation if self.use_observations_in_cost else self.states
         self.cost = self.get_cost(x, asnumpy(action))
 
-        return observation
+        return observation, {}
 
     def render(self, mode='human'):
         if mode != 'console':

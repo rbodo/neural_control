@@ -3,11 +3,11 @@ import os
 import sys
 from typing import Callable, Optional, Tuple, Union, Sized
 
-import gym
 import mlflow
 import numpy as np
 import torch
-from gym.wrappers import TimeLimit
+import gymnasium as gym
+from gymnasium.wrappers import TimeLimit
 from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
@@ -138,7 +138,7 @@ def run_single(env: Union[DiGym, POMDP],
         - Episode rewards with shape (num_timesteps,).
     """
     t = 0
-    y = env.reset()
+    y, _ = env.reset()
     x = env.states
     reward = 0
 
@@ -157,7 +157,8 @@ def run_single(env: Union[DiGym, POMDP],
             monitor.update_variables(t, states=x, outputs=y, control=u,
                                      cost=-reward)
 
-        y, reward, done, info = env.step(u)
+        y, reward, terminated, truncated, info = env.step(u)
+        done = terminated or truncated
         rewards.append(reward)
         x = env.states
         t += env.dt

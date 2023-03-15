@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import time
 from typing import Optional, Union, Any, Tuple
 
-import gym
+import gymnasium as gym
 import mlflow
 import mxnet as mx
 import numpy as np

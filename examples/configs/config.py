@@ -41,6 +41,6 @@ def get_config() -> CfgNode:
     config.model = CfgNode()
     config.model.USE_SINGLE_MODEL_IN_SWEEP = False  # Concerns RNN noise sweep.
 
-    config.set_new_allowed(True)
+    config.defrost()
 
     return config

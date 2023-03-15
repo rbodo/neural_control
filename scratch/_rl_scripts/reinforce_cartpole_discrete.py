@@ -1,5 +1,5 @@
 import argparse
-import gym
+import gymnasium as gym
 import numpy as np
 from itertools import count
 

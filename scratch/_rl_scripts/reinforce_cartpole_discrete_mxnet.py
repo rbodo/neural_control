@@ -1,5 +1,5 @@
 import os
-import gym
+import gymnasium as gym
 import numpy as np
 
 from mxnet import nd, gluon, init, autograd
