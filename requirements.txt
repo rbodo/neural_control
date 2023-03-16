@@ -1,6 +1,6 @@
 mlflow
 seaborn
-gymnasium[mujuco]
+gymnasium[mujoco]
 torch
 control
 yacs
@@ -8,5 +8,6 @@ tqdm
 optuna
 plotly
 mxnet
+tensorboard
 git+https://github.com/DLR-RM/stable-baselines3@feat/gymnasium-support
 git+https://github.com/Stable-Baselines-Team/stable-baselines3-contrib@feat/gymnasium-support

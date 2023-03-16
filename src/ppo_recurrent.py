@@ -115,9 +115,7 @@ class RecurrentRolloutBuffer(RolloutBuffer):
                 "advantages",
                 "returns",
                 "hidden_states_pi",
-                "cell_states_pi",
                 "hidden_states_vf",
-                "cell_states_vf",
                 "episode_starts",
             ]:
                 self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
@@ -167,14 +165,14 @@ class RecurrentRolloutBuffer(RolloutBuffer):
             # 1. (n_envs * n_steps, n_layers, dim) -> (batch_size, n_layers, dim)
             # 2. (batch_size, n_layers, dim)  -> (n_seq, n_layers, dim)
             # 3. (n_seq, n_layers, dim) -> (n_layers, n_seq, dim)
-            self.hidden_states_pi[batch_inds][self.seq_start_indices].swapaxes(0, 1),
+            self.hidden_states_pi[batch_inds][self.seq_start_indices].swapaxes(0, 1)
         )
         lstm_states_vf = (
             # (n_envs * n_steps, n_layers, dim) -> (n_layers, n_seq, dim)
-            self.hidden_states_vf[batch_inds][self.seq_start_indices].swapaxes(0, 1),
+            self.hidden_states_vf[batch_inds][self.seq_start_indices].swapaxes(0, 1)
         )
-        lstm_states_pi = self.to_torch(lstm_states_pi)
-        lstm_states_vf = self.to_torch(lstm_states_vf)
+        lstm_states_pi = self.to_torch(lstm_states_pi).contiguous()
+        lstm_states_vf = self.to_torch(lstm_states_vf).contiguous()
 
         return RecurrentRolloutBufferSamples(
             # (batch_size, obs_dim) -> (n_seq, max_length, obs_dim) -> (n_seq * max_length, obs_dim)
