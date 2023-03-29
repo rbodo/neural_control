@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator
+from gymnasium.core import RenderFrame, ActType, ObsType
+from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator, \
+    SupportsFloat, Any
 
 import numpy as np
 import gymnasium as gym
@@ -71,9 +73,10 @@ class RnnModel(nn.Module):
         self.rnn.reset_parameters()
         self.decoder.reset_parameters()
 
-    def begin_state(self, batch_size: int) -> torch.Tensor:
-        return torch.zeros(self.num_layers, batch_size, self.num_hidden,
-                           **self.tkwargs)
+    def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
+        shape = [self.num_layers, batch_size, self.num_hidden] if batch_size \
+            else [self.num_layers, self.num_hidden]
+        return torch.zeros(*shape, **self.tkwargs)
 
     def forward(self, x: torch.Tensor, h: torch.Tensor
                 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -230,32 +233,17 @@ class MLP:
         return self.process.dynamics(x, u)
 
 
-class ControlledRnn(nn.Module):
-    """Perturbed RNN stabilized by a controller RNN."""
-    def __init__(self, rnn: nn.RNN, controller: RnnModel):
+class ControlledNeuralSystem(nn.Module):
+    """Perturbed neural system stabilized by a controller RNN."""
+    def __init__(self, neural_system: nn.Module, controller: RnnModel):
         super().__init__()
-        self.neuralsystem = rnn
+        self.neuralsystem = neural_system
         self.controller = controller
         self.tkwargs = self.controller.tkwargs
-        self.input_size = self.neuralsystem.input_size
-        self.num_layers = self.neuralsystem.num_layers
-        self.hidden_size = self.neuralsystem.hidden_size
         self._weight_hashes = None
 
-    def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
-        neuralsystem_states, controller_states = self.begin_state(x.shape[1])
-        if h is not None:
-            neuralsystem_states = h
-        neuralsystem_outputs = []
-        for neuralsystem_input in x:
-            controller_output, controller_states = self.controller(
-                neuralsystem_states, controller_states)
-            neuralsystem_output, neuralsystem_states = self.neuralsystem(
-                neuralsystem_input.unsqueeze(0),
-                neuralsystem_states + controller_output)
-            neuralsystem_outputs.append(neuralsystem_output)
-        return torch.concat(neuralsystem_outputs, dim=0), neuralsystem_states
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError
 
     def readout(self, x: torch.Tensor) -> torch.Tensor:
         return (torch.tensordot(x, self.controller.rnn.weight_ih_l0.T, 1) +
@@ -284,12 +272,81 @@ class ControlledRnn(nn.Module):
     def is_static(self, key: str, weight_hashes: Dict[str, List[int]]) -> bool:
         return np.array_equal(weight_hashes[key], self._weight_hashes[key])
 
-    def assert_plasticity(self, freeze_neuralsystem: bool,
-                          freeze_controller: bool):
+    def assert_plasticity(self, where: Dict[str, bool]):
         """Make sure only the allowed weights have been modified."""
         hashes = self.get_weight_hash()
-        assert self.is_static('neuralsystem', hashes) == freeze_neuralsystem
-        assert self.is_static('controller', hashes) == freeze_controller
+        for key, is_frozen in where.items():
+            assert self.is_static(key, hashes) == is_frozen
+
+
+class ControlledRnn(ControlledNeuralSystem):
+    """Perturbed RNN stabilized by a controller RNN."""
+    def __init__(self, rnn: nn.RNN, controller: RnnModel):
+        super().__init__(rnn, controller)
+        self.input_size = self.neuralsystem.input_size
+        self.num_layers = self.neuralsystem.num_layers
+        self.hidden_size = self.neuralsystem.hidden_size
+
+    def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
+        neuralsystem_states, controller_states = self.begin_state(x.shape[1])
+        if h is not None:
+            neuralsystem_states = h
+        neuralsystem_outputs = []
+        for neuralsystem_input in x:
+            controller_output, controller_states = self.controller(
+                neuralsystem_states, controller_states)
+            neuralsystem_output, neuralsystem_states = self.neuralsystem(
+                neuralsystem_input.unsqueeze(0),
+                neuralsystem_states + controller_output)
+            neuralsystem_outputs.append(neuralsystem_output)
+        return torch.concat(neuralsystem_outputs, dim=0), neuralsystem_states
+
+
+class ControlledMlp(ControlledNeuralSystem):
+    """Perturbed MLP stabilized by a controller RNN."""
+    def __init__(self, mlp: nn.Module, controller: RnnModel,
+                 a_max: Optional[float] = None):
+        super().__init__(mlp, controller)
+        self.a_max = a_max
+
+    def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        controller_states = self.begin_state()
+        neuralsystem_outputs = []
+        for neuralsystem_input, environment_output in zip(x, u):
+            neuralsystem_input = neuralsystem_input.unsqueeze(0)
+            environment_output = environment_output.unsqueeze(0)
+            neuralsystem_output = self.neuralsystem(neuralsystem_input)
+            controller_output, controller_states = self.controller(
+                environment_output, controller_states)
+            controller_output = torch.clip(controller_output, max=self.a_max)
+            neuralsystem_output += controller_output
+            neuralsystem_outputs.append(neuralsystem_output)
+        return torch.concat(neuralsystem_outputs, dim=0)
+
+    def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
+        return self.controller.begin_state(batch_size)
+
+
+class BidirectionalControlledMlp(ControlledMlp):
+    """Perturbed MLP stabilized by a controller RNN which uses measurements
+    from the MLP itself."""
+
+    def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        controller_states = self.begin_state()
+        neuralsystem_outputs = []
+        for neuralsystem_input, environment_output in zip(x, u):
+            neuralsystem_input = neuralsystem_input.unsqueeze(0)
+            environment_output = environment_output.unsqueeze(0)
+            neuralsystem_output = self.neuralsystem(neuralsystem_input)
+            controller_input = torch.concat([neuralsystem_output,
+                                             environment_output], -1)
+            controller_output, controller_states = self.controller(
+                controller_input, controller_states)
+            controller_output = torch.clip(controller_output, max=self.a_max)
+            neuralsystem_output += controller_output
+            neuralsystem_outputs.append(neuralsystem_output)
+        return torch.concat(neuralsystem_outputs, dim=0)
 
 
 class DiMlp(MLP):
@@ -304,7 +361,23 @@ class DiMlp(MLP):
                          activation_output, q, r, path_model)
 
 
-class DiGym(gym.Env):
+class StatefulGym(gym.Env):
+    """gym.Env with a state and dt attribute."""
+
+    def __init__(self, dt: float):
+        super().__init__()
+        self.dt = dt
+        self.states = None
+
+    def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool,
+                                             bool, dict[str, Any]]:
+        raise NotImplementedError
+
+    def render(self) -> RenderFrame | list[RenderFrame] | None:
+        raise NotImplementedError
+
+
+class DiGym(StatefulGym):
     """Double integrator that follows gym interface."""
 
     metadata = {'render.modes': ['console']}
@@ -314,10 +387,9 @@ class DiGym(gym.Env):
                  cost_threshold=1e-3, state_threshold=None,
                  q: Union[float, np.iterable] = 0.5, r=0.5,
                  dtype=torch.float32, use_observations_in_cost=False):
-        super().__init__()
-        self.dt = dt
+        super().__init__(dt)
         self.tkwargs = dict(dtype=dtype, device=device)
-        self.dtype = np.dtype(str(dtype).split('.')[1])
+        self.dtype = np.dtype(str(dtype).split('.')[1]).type
         self.use_observations_in_cost = use_observations_in_cost
         self.process = DI(num_inputs, num_outputs, num_states, var_x, var_y,
                           self.dt, **self.tkwargs)
@@ -414,13 +486,96 @@ class DiGym(gym.Env):
         logging.info("States: ", self.states, "\tCost: ", self.cost)
 
 
+class SteinmetzGym(StatefulGym):
+    """Gym environment that reproduces the Steinmetz behavioral study.
+
+    A mouse views a grating on the left and right. The gratings may have
+    different contrast values. The mouse must turn a wheel to the side with the
+    higher contrast.
+    """
+
+    metadata = {'render.modes': ['console']}
+
+    def __init__(self, render_mode=None, num_contrast_levels=5,
+                 time_stimulus=50, time_end=350, dt=0.1, action_threshold=0.1):
+        super().__init__(dt)
+        self.observation_space = spaces.Box(0, 1, (2,))
+        self.action_space = spaces.Box(-1, 1, (1,))
+        assert render_mode is None \
+            or render_mode in self.metadata['render_modes']
+        self.render_mode = render_mode
+        self._contrast_levels = np.linspace(0, 1, num_contrast_levels)
+        self._contrast_left, self._contrast_right = None, None
+        self.time = None
+        self._time_stimulus = time_stimulus
+        self._time_end = time_end
+        self.threshold = action_threshold
+
+    @property
+    def is_post_stimulus(self):
+        return self.time >= self._time_stimulus
+
+    def _get_obs(self):
+        if self.is_post_stimulus:
+            return self._contrast_left, self._contrast_right
+        else:
+            return 0, 0
+
+    def _get_info(self):
+        return {'Time': self.time,
+                'Contrast': (self._contrast_left, self._contrast_right)}
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+
+        while True:
+            self._contrast_left = self.np_random.choice(self._contrast_levels)
+            self._contrast_right = self.np_random.choice(self._contrast_levels)
+            if self._contrast_left != self._contrast_right:
+                break
+
+        self.time = 0
+
+        observation = self._get_obs()
+        info = self._get_info()
+        self.states = np.expand_dims(observation, 0)
+
+        self.render()
+
+        return observation, info
+
+    def step(self, action):
+        terminated = self.time >= self._time_end
+        self.time += 1
+        observation = self._get_obs()
+        contrast_left, contrast_right = observation
+        correct_action = np.sign(contrast_right - contrast_left)
+        if correct_action == 0:
+            is_correct = np.abs(action) < self.threshold
+        else:
+            is_correct = np.sign(action) == correct_action
+
+        reward = is_correct * self.is_post_stimulus
+
+        info = self._get_info()
+        self.states = np.expand_dims(observation, 0)
+
+        self.render()
+
+        return observation, float(reward), terminated, False, info
+
+    def render(self):
+        if self.render_mode == 'console':
+            logging.info(self._get_info())
+
+
 class Masker:
     """Helper class to set certain rows in the readout and stimulation matrix
     of a controller to zero."""
     def __init__(self, model: ControlledRnn, p, rng: np.random.Generator):
         self.model = model
         self.p = p
-        n = self.model.hidden_size
+        n = self.model.hidden_size if hasattr(self.model, 'hidden_size') else 1
         self._controllability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
         self._observability_mask = np.flatnonzero(rng.binomial(1, self.p, n))
         self.controllability = 1 - len(self._controllability_mask) / n

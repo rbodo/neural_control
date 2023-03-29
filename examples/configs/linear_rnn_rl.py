@@ -29,6 +29,8 @@ def get_config():
     config.training.NUM_EPOCHS_CONTROLLER = 1e5
     config.training.BATCH_SIZE = 0
     config.training.LEARNING_RATE = 2e-4
+    config.training.EVALUATE_EVERY_N = 5000
+    config.training.NUM_TEST = 100
 
     config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 50

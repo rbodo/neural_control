@@ -16,6 +16,7 @@ from scratch.configs import (
     config_rnn_analytic,
     config_rnn_defaults,
     config_rnn_lqe,
+    config_steinmetz_rnn_rl,
     config_test_rnn,
     config_test_rnn_all_noises,
     config_test_rnn_generalization,

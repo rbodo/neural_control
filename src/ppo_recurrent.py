@@ -39,7 +39,7 @@ from stable_baselines3.common.utils import zip_strict
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 from sb3_contrib.ppo_recurrent.policies import CnnLstmPolicy, MlpLstmPolicy, MultiInputLstmPolicy
 
-from src.control_systems_torch import RnnModel, ControlledRnn
+from src.control_systems_torch import RnnModel, ControlledRnn, ControlledMlp
 
 SelfRecurrentPPO = TypeVar("SelfRecurrentPPO", bound="RecurrentPPO")
 
@@ -214,7 +214,6 @@ class MlpRnnPolicy(ActorCriticPolicy):
         shared_lstm: bool = False,
         enable_critic_lstm: bool = True,
         lstm_kwargs: Optional[Dict[str, Any]] = None,
-        controller: Optional[RnnModel] = None,
     ):
         self.lstm_output_dim = lstm_hidden_size
         super().__init__(
@@ -246,11 +245,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
             num_layers=n_lstm_layers,
             **self.lstm_kwargs,
         )
-        if controller is not None:
-            self.lstm_actor = ControlledRnn(
-                self.lstm_actor,
-                controller,
-            )
+
         # For the predict() method, to initialize hidden states
         # (n_lstm_layers, batch_size, lstm_hidden_size)
         self.lstm_hidden_state_shape = (n_lstm_layers, 1, lstm_hidden_size)
@@ -287,7 +282,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         Create the policy and value networks.
         Part of the layers can be shared.
         """
-        self.mlp_extractor = MlpExtractor(
+        self.mlp_extractor = GeneralizedMlpExtractor(
             self.lstm_output_dim,
             net_arch=self.net_arch,
             activation_fn=self.activation_fn,
@@ -377,7 +372,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
             latent_vf = self.critic(vf_features)
             lstm_states_vf = lstm_states_pi
 
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi)
+        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
         latent_vf = self.mlp_extractor.forward_critic(latent_vf)
 
         # Evaluate the values for the given observations
@@ -405,7 +400,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         # Call the method from the parent of the parent class
         features = super(ActorCriticPolicy, self).extract_features(obs, self.pi_features_extractor)
         latent_pi, lstm_states = self._process_sequence(features, lstm_states, episode_starts, self.lstm_actor)
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi)
+        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
         return self._get_action_dist_from_latent(latent_pi), lstm_states
 
     def predict_values(
@@ -467,7 +462,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         else:
             latent_vf = self.critic(vf_features)
 
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi)
+        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
         latent_vf = self.mlp_extractor.forward_critic(latent_vf)
 
         distribution = self._get_action_dist_from_latent(latent_pi)
@@ -557,6 +552,60 @@ class MlpRnnPolicy(ActorCriticPolicy):
             actions = actions.squeeze(axis=0)
 
         return actions, states
+
+
+class ControlledActorMlpRnnPolicy(MlpRnnPolicy):
+    def __init__(self, controller, observation_space: gym.spaces.Space,
+                 action_space: gym.spaces.Space, lr_schedule: Schedule, *args,
+                 **kwargs):
+        super().__init__(observation_space, action_space, lr_schedule, *args,
+                         **kwargs)
+        # Connect actor with controller.
+        self.lstm_actor = ControlledRnn(self.lstm_actor, controller)
+        # Setup optimizer again to include controller weights.
+        self.optimizer = self.optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
+
+
+class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
+    def __init__(self, controller, *args, **kwargs):
+        self.controller = controller  # Used by self._build_mlp_extractor()
+        super().__init__(*args, **kwargs)
+
+    def _build_mlp_extractor(self) -> None:
+        """
+        Create the policy and value networks.
+        Part of the layers can be shared.
+        """
+        self.net_arch['controller'] = self.controller
+        self.mlp_extractor = ControlledMlpExtractor(
+            feature_dim=self.lstm_output_dim, net_arch=self.net_arch,
+            activation_fn=self.activation_fn, device=self.device)
+
+
+class GeneralizedMlpExtractor(MlpExtractor):
+    def forward(self, features: th.Tensor, **args) -> Tuple[th.Tensor, th.Tensor]:
+        """
+        :return: latent_policy, latent_value of the specified network.
+            If all layers are shared, then ``latent_policy == latent_value``
+        """
+        return self.forward_actor(features, *args), self.forward_critic(features)
+
+    def forward_actor(self, features: th.Tensor, *args) -> th.Tensor:
+        return self.policy_net(features, *args)
+
+
+class ControlledMlpExtractor(GeneralizedMlpExtractor):
+    def __init__(
+        self,
+        feature_dim: int,
+        net_arch: Union[List[int], Dict[str, Union[List[int], RnnModel]]],
+        activation_fn: Type[nn.Module],
+        device: Union[th.device, str] = "auto",
+    ) -> None:
+        super().__init__(feature_dim, net_arch, activation_fn, device)
+        self.policy_net = ControlledMlp(self.policy_net,
+                                        net_arch['controller'], 6.25)
 
 
 class RecurrentPPO(OnPolicyAlgorithm):

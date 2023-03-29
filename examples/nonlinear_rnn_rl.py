@@ -10,10 +10,56 @@ import matplotlib
 from matplotlib import pyplot as plt
 
 from examples import configs
-from examples.linear_rnn_rl import LinearRlPipeline, run_single, POMDP, run_n
+from examples.linear_rnn_rl import LinearRlPipeline, run_single, run_n
 from src.plotting import plot_phase_diagram
+from src.utils import atleast_3d, get_additive_white_gaussian_noise
 
 matplotlib.use('Agg')
+
+
+class POMDP(gym.ObservationWrapper):
+    def __init__(self, env: gym.Env, sigma: float, rng: np.random.Generator,
+                 observation_indices: np.iterable, dt: float):
+        """Custom gym ObservationWrapper to remove part of the observations and
+        add noise to the others.
+
+        Parameters
+        ----------
+        env
+            Environment to wrap.
+        sigma
+            Standard deviation of gaussian noise distribution.
+        rng
+            Pseudo-random number generator.
+        observation_indices
+            Indices of states to observe.
+        dt
+            Time constant for stepping through the environment.
+        """
+        super().__init__(env)
+        self.rng = rng
+        self.observation_indexes = observation_indices
+        self.dt = dt
+        num_observations = len(self.observation_indexes)
+        self.sigma = np.eye(num_observations) * sigma
+        self._add_noise = sigma > 0
+        # We add a dummy batch and time dimension to the observations to make
+        # the environment compatible with the torch RNN pipeline.
+        shape = (1, 1, num_observations)
+        # noinspection PyUnresolvedReferences
+        self.observation_space = gym.spaces.Box(
+            low=atleast_3d(env.observation_space.low[observation_indices]),
+            high=atleast_3d(env.observation_space.high[observation_indices]),
+            shape=shape, dtype=env.observation_space.dtype)
+        self.states = None
+
+    def observation(self, observation):
+        self.states = atleast_3d(observation)
+        noise = 0
+        if self._add_noise:
+            noise = get_additive_white_gaussian_noise(self.sigma, rng=self.rng)
+        partial_observation = observation[self.observation_indexes]
+        return atleast_3d(partial_observation + noise)
 
 
 class NonlinearRlPipeline(LinearRlPipeline):

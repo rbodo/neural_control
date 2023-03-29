@@ -9,8 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from examples import configs
-from examples.linear_rnn_rl import POMDP
-from examples.nonlinear_rnn_rl import NonlinearRlPipeline, run_single
+from examples.nonlinear_rnn_rl import NonlinearRlPipeline, run_single, POMDP
 from examples.visualize_linear_rnn_lqr import (
     add_scalars, get_runs_perturbed, get_runs_unperturbed, get_runs_all,
     get_log_path, get_model_trained, get_model_unperturbed_untrained,
