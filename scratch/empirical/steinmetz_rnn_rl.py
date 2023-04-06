@@ -1,46 +1,64 @@
 import os
-
+import sys
 import logging
+from stable_baselines3.common.logger import Figure
+from typing import Union, Tuple, Optional, Callable
+
 import mlflow
 import numpy as np
-import sys
 import torch
-from matplotlib import pyplot as plt
-from stable_baselines3.common.callbacks import EveryNTimesteps
-from typing import Union, Tuple, Optional
-
 from gymnasium.wrappers import TimeLimit
+from matplotlib import pyplot as plt
+from stable_baselines3.common.callbacks import EveryNTimesteps, BaseCallback
+import seaborn as sns
 
-from examples.linear_rnn_rl import LinearRlPipeline, run_n, run_single, \
-    EvaluationCallback, linear_schedule
 from scratch import configs
-from src.control_systems_torch import SteinmetzGym, RnnModel
-from src.ppo_recurrent import RecurrentPPO, ControlledExtractorMlpRnnPolicy
+from examples.linear_rnn_rl import (LinearRlPipeline, run_single,
+                                    linear_schedule)
+from src.control_systems_torch import (SteinmetzGym, RnnModel, ControlledMlp,
+                                       BidirectionalControlledMlp)
+from src.ppo_recurrent import (RecurrentPPO, ControlledExtractorMlpRnnPolicy,
+                               CnnExtractor)
 from src.utils import get_artifact_path
 
 
-def plot_trajectory(actions, rewards, xt=None, path=None, show=True,
-                    ylim=None):
+def plot_trajectory(infos, path=None, show=True, ylim=None):
 
     plt.close()
 
+    times = []
+    responses = []
+    positions = []
+    for info in infos:
+        times.append(info['time'])
+        responses.append(info['response'])
+        positions.append(info['position'])
+    info = infos[-1]
+    time_stimulus = info['time_stimulus']
+    time_gocue = info['time_gocue']
+    time_end = min(info['time_end'], info['time'])  # May have stopped early.
+    correct_response = info['correct_response'] or 0
+    correct_response *= 90
+    reward = info['reward']
+
     # Draw trajectory.
-    plt.plot(actions, label='Behavior (wheel speed)')
-    plt.xlabel('Time')
-    plt.ylabel('A.U.')
-
-    plt.fill_between(np.arange(len(rewards)), *ylim, where=rewards,
-                     color='green', alpha=0.2)
-
-    # Draw target line.
-    if xt is not None:
-        plt.plot(xt, linestyle='--', color='k',
-                 label='Stimulus (contrast grating)')
+    plt.plot(times, positions, label='Wheel position')
+    plt.hlines(correct_response, time_gocue, time_end,
+               linestyle='--', color='k', label='Target')
+    plt.axvline(time_stimulus, linestyle=':', color='k')
+    plt.axvline(time_gocue, linestyle=':', color='k')
+    plt.axvline(time_end, linestyle=':', color='k')
+    plt.xlabel('Time [s]')
+    plt.ylabel('Stimulus position [dva]')
+    if reward > 0:
+        plt.title(f'Response: {responses[-1]} (correct).', dict(color='green'))
+    else:
+        plt.title(f'Response: {responses[-1]} (false).', dict(color='red'))
 
     plt.legend()
 
     if ylim is not None:
-        plt.ylim(ylim)
+        plt.ylim(-ylim, ylim)
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
@@ -65,14 +83,56 @@ def set_weights_neuralsystem(model, device):
     model.policy.lstm_actor.flatten_parameters()
 
 
+class EvaluationCallback(BaseCallback):
+    """
+    Custom torch callback to evaluate an RL agent and log a phase diagram.
+    """
+    def __init__(self, num_test: int, evaluate_function: Callable,
+                 reward_norm: Optional[float] = 1):
+        super().__init__()
+        self.num_test = num_test
+        self.evaluate = evaluate_function
+        self.reward_norm = reward_norm
+
+    def _on_step(self) -> bool:
+        n = self.n_calls
+        env = self.locals['env'].envs[0]
+        test_accuracy, episode_length, figure = self.evaluate(
+            env, self.num_test, f'trajectory_{n}.png')
+        rewards = [b['r'] for b in self.model.ep_info_buffer]
+        train_accuracy = np.mean(np.greater(rewards, 0)).item()
+        self.logger.record('trajectory/eval', Figure(figure, close=True),
+                           exclude=('stdout', 'log', 'json', 'csv'))
+        self.logger.record('test/episode_reward', test_accuracy)
+        mlflow.log_metric(key='test_accuracy', value=test_accuracy, step=n)
+        self.logger.record('test/episode_length', episode_length)
+        mlflow.log_metric(key='test_episode_length', value=episode_length,
+                          step=n)
+        mlflow.log_metric(key='training_accuracy', value=train_accuracy,
+                          step=n)
+        plt.close()
+        return True
+
+    def reset(self):
+        self.n_calls = 0
+
+
+def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
+    """Run an RL agent for `n` episodes and return reward and run lengths."""
+    final_rewards = []
+    episode_lengths = []
+    for i in range(n):
+        states, rewards = run_single(*args, **kwargs)
+        final_rewards.append(rewards[-1])
+        episode_lengths.append(len(rewards))
+    return final_rewards, episode_lengths
+
+
 class SteinmetzRlPipeline(LinearRlPipeline):
     def __init__(self, config):
         super().__init__(config)
-        self.reward_norm = (config.simulation.NUM_STEPS -
-                            config.process.TIME_STIMULUS) + 1
         num_test = config.training.NUM_TEST
-        self.evaluation_callback = EvaluationCallback(num_test, self.evaluate,
-                                                      self.reward_norm)
+        self.evaluation_callback = EvaluationCallback(num_test, self.evaluate)
 
     def evaluate(self, env: SteinmetzGym, n: int,
                  filename: Optional[str] = None,
@@ -95,38 +155,37 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         Returns
         -------
         results
-            A tuple with the average reward and episode length.
+            A tuple with the accuracy and episode length.
         """
-        reward_means, episode_lengths = run_n(n, env, self.model,
-                                              deterministic=deterministic)
+        final_rewards, episode_lengths = run_n(n, env, self.model,
+                                               deterministic=deterministic)
         f = None
         if filename is not None:
-            states, rewards, actions = run_single(env, self.model,
-                                                  return_actions=True)
-            f = plot_trajectory(actions, rewards, xt=np.diff(states),
-                                show=False, ylim=[-1.1, 1.1])
+            _, _, infos = run_single(env, self.model, return_infos=True)
+            with sns.axes_style('ticks'):
+                f = plot_trajectory(infos, show=False, ylim=100)
             mlflow.log_figure(f, os.path.join('figures', filename))
-        mean_reward = np.mean(reward_means).item()
+        accuracy = np.mean(np.greater(final_rewards, 0)).item()
         mean_length = np.mean(episode_lengths).item()
-        return mean_reward, mean_length, f
+        return accuracy, mean_length, f
 
     def get_environment(self, *args, **kwargs) -> Union[SteinmetzGym,
                                                         TimeLimit]:
         """Create a double integrator gym environment."""
-        num_contrast_levels = self.config.process.NUM_CONTRAST_LEVELS
+        contrast_levels = self.config.process.CONTRAST_LEVELS
         time_stimulus = self.config.process.TIME_STIMULUS
-        num_steps = self.config.simulation.NUM_STEPS
-        T = self.config.simulation.T
-        dt = T / num_steps
-        environment = SteinmetzGym(num_contrast_levels=num_contrast_levels,
+        timeout_wait = self.config.process.TIMEOUT_WAIT
+        gocue_wait = self.config.process.GOCUE_WAIT
+        dt = self.config.process.DT
+        environment = SteinmetzGym(contrast_levels=contrast_levels,
                                    time_stimulus=time_stimulus,
-                                   time_end=num_steps, dt=dt)
-        environment = TimeLimit(environment, num_steps)
+                                   timeout_wait=timeout_wait,
+                                   gocue_wait=gocue_wait, dt=dt)
         return environment
 
     def get_model(self, freeze_neuralsystem, freeze_controller, environment,
                   load_weights_from=None) -> RecurrentPPO:
-        neuralsystem_num_inputs = 2
+        neuralsystem_num_inputs = 32
         neuralsystem_num_states = 3
         neuralsystem_num_hidden = self.config.model.NUM_HIDDEN_NEURALSYSTEM
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
@@ -135,7 +194,11 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         activation_rnn = self.config.model.ACTIVATION
         activation_decoder = 'relu'  # Defaults to 'linear'
         learning_rate = self.config.training.LEARNING_RATE
-        num_steps = self.config.simulation.NUM_STEPS
+        time_stimulus = self.config.process.TIME_STIMULUS
+        timeout_wait = self.config.process.TIMEOUT_WAIT
+        gocue_wait = self.config.process.GOCUE_WAIT
+        dt = self.config.process.DT
+        num_steps = int((time_stimulus + gocue_wait + timeout_wait) / dt)
         dtype = torch.float32
         use_bidirectional_controller = True
 
@@ -150,13 +213,17 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         if load_weights_from is None:
             controller.init_zero()
 
-        policy_kwargs = {'lstm_hidden_size': neuralsystem_num_hidden,
-                         'n_lstm_layers': neuralsystem_num_layers,
-                         'activation_fn': torch.nn.Tanh,
-                         'net_arch': {'pi': [3]},
-                         'controller': controller,
-                         'log_std_init': -1,
-                         }
+        policy_kwargs = {
+            'lstm_hidden_size': neuralsystem_num_hidden,
+            'n_lstm_layers': neuralsystem_num_layers,
+            'activation_fn': torch.nn.Tanh,
+            'net_arch': {'pi': [3], 'controller': controller,
+                         'mlp_extractor_class': BidirectionalControlledMlp if
+                         use_bidirectional_controller else ControlledMlp},
+            'features_extractor_class': CnnExtractor,
+            'features_extractor_kwargs': {
+                'features_dim': neuralsystem_num_inputs}
+        }
         log_dir = get_artifact_path('tensorboard_log')
         model = RecurrentPPO(
             ControlledExtractorMlpRnnPolicy, environment, verbose=0,
@@ -172,6 +239,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
 
         controller.requires_grad_(not freeze_controller)
         model.policy.action_net.requires_grad_(not freeze_neuralsystem)
+        model.policy.features_extractor.requires_grad_(not freeze_neuralsystem)
         model.policy.lstm_actor.requires_grad_(False)
         model.policy.mlp_extractor.policy_net.neuralsystem.requires_grad_(
             False)
@@ -213,16 +281,16 @@ class SteinmetzRlPipeline(LinearRlPipeline):
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
-            self.apply_perturbation()
+            self.apply_perturbation(rng)
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
         reward, length, _ = self.evaluate(environment, num_test,
                                           deterministic=False)
-        mlflow.log_metric('training_reward', reward / self.reward_norm, -1)
+        mlflow.log_metric('training_accuracy', reward, -1)
         reward, length, _ = self.evaluate(environment, num_test,
                                           'trajectory_-1.png')
-        mlflow.log_metric('test_reward', reward / self.reward_norm, -1)
+        mlflow.log_metric('test_accuracy', reward, -1)
 
         # Initialize controller weights.
         if is_perturbed:
@@ -244,7 +312,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         self.model.learn(num_epochs, callback=callbacks)
 
         controlled_neuralsystem.assert_plasticity(
-            freeze_controller=freeze_controller)
+            dict(controller=freeze_controller))
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
@@ -252,9 +320,15 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             self.model.save(path_model)
             logging.info(f"Saved model to {path_model}.")
 
-    def apply_perturbation(self):
-        # self.model.policy.lstm_actor.weight_ih_l0.data[:] = 0
-        self.model.policy.lstm_actor.weight_ih_l0.data[:] *= -0.001
+    def apply_perturbation(self, rng: np.random.Generator):
+        with torch.no_grad():
+            w = self.model.policy.mlp_extractor.policy_net.neuralsystem[0].weight
+            w_np = w.data.cpu().numpy()
+            rng.shuffle(w_np)
+            w.data[:] = torch.tensor(w_np, device=self.device)
+            w.requires_grad_(False)
+            # self.model.policy.lstm_actor.weight_ih_l0.data[:] = 0
+            # self.model.policy.lstm_actor.weight_ih_l0.data[:] *= -0.001
 
 
 if __name__ == '__main__':

@@ -568,19 +568,15 @@ class ControlledActorMlpRnnPolicy(MlpRnnPolicy):
 
 
 class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
-    def __init__(self, controller, *args, **kwargs):
-        self.controller = controller  # Used by self._build_mlp_extractor()
-        super().__init__(*args, **kwargs)
-
     def _build_mlp_extractor(self) -> None:
         """
         Create the policy and value networks.
         Part of the layers can be shared.
         """
-        self.net_arch['controller'] = self.controller
         self.mlp_extractor = ControlledMlpExtractor(
             feature_dim=self.lstm_output_dim, net_arch=self.net_arch,
-            activation_fn=self.activation_fn, device=self.device)
+            activation_fn=self.activation_fn, device=self.device,
+            controlled_mlp_class=self.net_arch['mlp_extractor_class'])
 
 
 class GeneralizedMlpExtractor(MlpExtractor):
@@ -601,11 +597,33 @@ class ControlledMlpExtractor(GeneralizedMlpExtractor):
         feature_dim: int,
         net_arch: Union[List[int], Dict[str, Union[List[int], RnnModel]]],
         activation_fn: Type[nn.Module],
+        controlled_mlp_class: Type[ControlledMlp],
         device: Union[th.device, str] = "auto",
     ) -> None:
         super().__init__(feature_dim, net_arch, activation_fn, device)
-        self.policy_net = ControlledMlp(self.policy_net,
-                                        net_arch['controller'], 6.25)
+        self.policy_net = controlled_mlp_class(self.policy_net,
+                                               net_arch['controller'], 6.25)
+
+
+class CnnExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space: gym.Space, features_dim: int = 512):
+        super().__init__(observation_space, features_dim)
+        n_input_channels = observation_space.shape[0]
+        self.cnn = nn.Sequential(
+            nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            nn.Flatten(),
+        )
+
+        # Compute shape by doing one forward pass
+        with th.no_grad():
+            n_flatten = self.cnn(th.as_tensor(observation_space.sample()[None]).float()).shape[1]
+
+        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
+        return self.linear(self.cnn(observations))
 
 
 class RecurrentPPO(OnPolicyAlgorithm):

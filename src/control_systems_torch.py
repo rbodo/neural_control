@@ -1,6 +1,7 @@
 import logging
 import os
 from gymnasium.core import RenderFrame, ActType, ObsType
+from skimage.filters import gabor_kernel
 from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator, \
     SupportsFloat, Any
 
@@ -320,8 +321,8 @@ class ControlledMlp(ControlledNeuralSystem):
             controller_output, controller_states = self.controller(
                 environment_output, controller_states)
             controller_output = torch.clip(controller_output, max=self.a_max)
-            neuralsystem_output += controller_output
-            neuralsystem_outputs.append(neuralsystem_output)
+            neuralsystem_outputs.append(neuralsystem_output +
+                                        controller_output)
         return torch.concat(neuralsystem_outputs, dim=0)
 
     def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
@@ -344,8 +345,8 @@ class BidirectionalControlledMlp(ControlledMlp):
             controller_output, controller_states = self.controller(
                 controller_input, controller_states)
             controller_output = torch.clip(controller_output, max=self.a_max)
-            neuralsystem_output += controller_output
-            neuralsystem_outputs.append(neuralsystem_output)
+            neuralsystem_outputs.append(neuralsystem_output +
+                                        controller_output)
         return torch.concat(neuralsystem_outputs, dim=0)
 
 
@@ -486,12 +487,15 @@ class DiGym(StatefulGym):
         logging.info("States: ", self.states, "\tCost: ", self.cost)
 
 
-class SteinmetzGym(StatefulGym):
+class SimpleSteinmetzGym(StatefulGym):
     """Gym environment that reproduces the Steinmetz behavioral study.
 
     A mouse views a grating on the left and right. The gratings may have
     different contrast values. The mouse must turn a wheel to the side with the
     higher contrast.
+
+    In this simplified version, the stimulus is represented by a static tuple
+    of contrast values.
     """
 
     metadata = {'render.modes': ['console']}
@@ -563,6 +567,215 @@ class SteinmetzGym(StatefulGym):
         self.render()
 
         return observation, float(reward), terminated, False, info
+
+    def render(self):
+        if self.render_mode == 'console':
+            logging.info(self._get_info())
+
+
+def get_gabor(rectify=True, normalize=True) -> np.ndarray:
+    frequency = 0.1
+    sigma = 9
+    theta = -np.pi / 4
+    gk = gabor_kernel(frequency, theta, sigma_x=sigma, sigma_y=sigma).real
+    if rectify:
+        gk = np.clip(gk, 0, None)
+    if normalize:
+        gk = norm(gk)
+    return gk
+
+
+def norm(x: np.ndarray) -> np.ndarray:
+    return (x - np.min(x)) / (np.max(x) - np.min(x))
+
+
+def apply_contrast(image: np.ndarray, contrast: float) -> np.ndarray:
+    return contrast * image
+
+
+class SteinmetzGym(StatefulGym):
+    """Gym environment that reproduces the Steinmetz behavioral study.
+
+    A mouse views a grating on the left and right. The gratings may have
+    different contrast values. The mouse must turn a wheel to the side with the
+    higher contrast.
+    """
+
+    metadata = {'render.modes': ['console']}
+
+    def __init__(self, contrast_levels: List[float],
+                 time_stimulus=50, timeout_wait=150, gocue_wait=50, dt=1,
+                 render_mode=None):
+        super().__init__(dt)
+        assert render_mode is None \
+            or render_mode in self.metadata['render_modes']
+        self.render_mode = render_mode
+        self._contrast_levels = np.array(contrast_levels)
+        self._correct_response = None
+        self._gabor_left, self._gabor_right = None, None
+        self._gabor_height, self._gabor_width = None, None
+        self.time = None
+        self._time_stimulus = time_stimulus
+        self._timeout_wait = timeout_wait
+        self._gocue_wait = gocue_wait
+        self._time_gocue = None
+        self._time_end = None
+        self._stimulus_width = 270
+        self._stimulus_height = 70
+        self._stimulus_y, self._stimulus_x = None, None
+        self._max_shift = 90
+        self._padx = None
+        self._padded_stimulus = None
+        self._tanh_to_pixel = self._max_shift
+        self.observation_space = spaces.Box(0, 1, (1, self._stimulus_height,
+                                                   self._stimulus_width))
+        self.action_space = spaces.Box(-1, 1, (1,))
+
+    @property
+    def is_post_stimulus(self):
+        return self.time >= self._time_stimulus
+
+    @property
+    def is_post_gocue(self):
+        return self.time >= self._time_gocue
+
+    @property
+    def is_response_registered(self):
+        return self._get_response() is not None
+
+    def _get_response(self):
+        """Returns None if no response was registered before timeout."""
+        if self._stimulus_x <= 0:
+            return -1
+        if self._stimulus_x >= 2 * self._max_shift:
+            return 1
+        if self.is_timeout:
+            return 0
+
+    @property
+    def is_timeout(self):
+        return self.time >= self._time_end
+
+    @property
+    def is_terminated(self):
+        return self.is_response_registered or self.is_timeout
+
+    def _get_background(self):
+        return np.zeros((self._stimulus_height,
+                         self._stimulus_width + 2 * self._padx))
+
+    def _crop_padding(self):
+        return self._padded_stimulus[:, self._padx:-self._padx]
+
+    def insert_gabor(self):
+        y = self._stimulus_y
+        x = np.clip(self._stimulus_x, 0, 2 * self._max_shift)
+        yrange = slice(y, y + self._gabor_height)
+        xrange = slice(x, x + self._gabor_width)
+        self._padded_stimulus[yrange, xrange] = self._gabor_left
+
+        d = int(self._stimulus_width * 2 / 3)
+        xrange = slice(x + d, x + d + self._gabor_width)
+        self._padded_stimulus[yrange, xrange] = self._gabor_right
+
+    def tanh_to_pixel(self, x: float) -> int:
+        f = np.floor if x < 0 else np.ceil
+        return int(f(self._tanh_to_pixel * x).item())
+
+    def _update_stimulus_position(self, action: float):
+        if self.is_post_gocue:
+            self._stimulus_x += self.tanh_to_pixel(action)
+
+    def _get_obs(self):
+        self._padded_stimulus = self._get_background()
+        if self.is_post_stimulus:
+            self.insert_gabor()
+        return np.expand_dims(self._crop_padding(), 0)
+
+    def _get_reward(self) -> float:
+        response = self._get_response()
+
+        # No response before timeout gets neither positive nor negative reward.
+        # If we get past this condition, it means a response was registered or
+        # the trial timed out.
+        if response is None:
+            return 0
+
+        # For an equal nonzero stimulus on both sides, any registered response
+        # gets a reward with 50% probability.
+        if self._correct_response is None:
+            return self.np_random.binomial(1, 0.5)
+
+        # Correct response.
+        if response == self._correct_response:
+            return 1
+
+        # No or wrong response.
+        return -1
+
+    def _get_info(self):
+        return {'time': self.time,
+                'time_stimulus': self._time_stimulus,
+                'time_gocue': self._time_gocue,
+                'time_end': self._time_end,
+                'position': self._stimulus_x - self._max_shift,
+                'correct_response': self._correct_response,
+                'response': self._get_response(),
+                'reward': self._get_reward()}
+
+    def _sample_contrast(self, allow_equal=True):
+        while True:
+            contrast_left = self.np_random.choice(self._contrast_levels)
+            contrast_right = self.np_random.choice(self._contrast_levels)
+            if (allow_equal or contrast_left != contrast_right or
+                    contrast_left == contrast_right == 0):
+                return contrast_left, contrast_right
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+
+        contrast_left, contrast_right = self._sample_contrast(
+            allow_equal=False)
+
+        gabor = get_gabor()
+        self._gabor_left = apply_contrast(gabor, contrast_left)
+        self._gabor_right = apply_contrast(gabor, contrast_right)
+        self._gabor_height, self._gabor_width = gabor.shape
+        self._stimulus_y = (self._stimulus_height - self._gabor_height) // 2
+        self._stimulus_x = self._max_shift
+        self._padx = (self._max_shift -
+                      (self._stimulus_width // 3 - self._gabor_width) // 2)
+        self._correct_response = np.sign(contrast_right - contrast_left)
+        if contrast_right == contrast_left and contrast_right > 0:
+            self._correct_response = None  # Signal random reward
+        self.time = 0
+        self._time_gocue = (self.np_random.random(1) * self._gocue_wait +
+                            2 * self._time_stimulus)
+        self._time_end = self._time_gocue + self._timeout_wait
+
+        observation = self._get_obs()
+        info = self._get_info()
+        self.states = observation
+
+        self.render()
+
+        return observation, info
+
+    def step(self, action):
+        self.time += self.dt
+
+        self._update_stimulus_position(action)
+
+        observation = self._get_obs()
+
+        reward = self._get_reward()
+
+        info = self._get_info()
+        self.states = observation
+
+        self.render()
+
+        return observation, reward, self.is_terminated, False, info
 
     def render(self):
         if self.render_mode == 'console':

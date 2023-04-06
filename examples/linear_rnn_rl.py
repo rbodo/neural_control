@@ -70,7 +70,7 @@ def run_single(env: StatefulGym,
                model: Union[RecurrentPPO, BaseAlgorithm],
                monitor: Optional[Monitor] = None,
                deterministic: Optional[bool] = True,
-               return_actions: Optional[bool] = False):
+               return_infos: Optional[bool] = False):
     """Run an RL agent for one episode and return states and rewards.
 
     Parameters
@@ -83,8 +83,8 @@ def run_single(env: StatefulGym,
         A logging container.
     deterministic
         If `True`, the actions are selected deterministically.
-    return_actions
-        If `True`, actions are returned.
+    return_infos
+        If `True`, info dicts are returned.
 
     Returns
     -------
@@ -94,7 +94,7 @@ def run_single(env: StatefulGym,
         - The environment states with shape (num_timesteps, 1, num_states). The
           second axis is a placeholder for the batch size.
         - Episode rewards with shape (num_timesteps,).
-        - The actions.
+        - List of info dicts for each time step.
     """
     t = 0
     y, _ = env.reset()
@@ -108,12 +108,11 @@ def run_single(env: StatefulGym,
     episode_starts = np.ones((num_envs,), dtype=bool)
     states = []
     rewards = []
-    actions = []
+    infos = []
     while True:
         u, lstm_states = model.predict(y, lstm_states, episode_starts,
                                        deterministic)
         states.append(x)
-        actions.append(u)
         if monitor is not None:
             monitor.update_variables(t, states=x, outputs=y, control=u,
                                      cost=-reward)
@@ -121,6 +120,7 @@ def run_single(env: StatefulGym,
         y, reward, terminated, truncated, info = env.step(u)
         done = terminated or truncated
         rewards.append(reward)
+        infos.append(info)
         x = env.states
         t += env.dt
         episode_starts = done
@@ -128,8 +128,8 @@ def run_single(env: StatefulGym,
             env.reset()
             break
     states = np.concatenate(states)
-    if return_actions:
-        return states, rewards, actions
+    if return_infos:
+        return states, rewards, infos
     return states, rewards
 
 

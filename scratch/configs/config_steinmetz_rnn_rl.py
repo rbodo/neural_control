@@ -7,22 +7,22 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = '8'
+    config.GPU = '6'
     config.EXPERIMENT_NAME = 'steinmetz_rnn_rl'
-    config.RESUME_EXPERIMENT = 'test35'  # 2023-03-16'
+    config.RESUME_EXPERIMENT = 'test66'  # 2023-03-16'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
     config.paths.BASE_PATH = base_path
 
-    config.simulation.NUM_STEPS = 50
-    config.simulation.T = config.simulation.NUM_STEPS / 10
-
     # Environment
-    config.process.NUM_CONTRAST_LEVELS = 5
-    config.process.TIME_STIMULUS = 20
+    config.process.CONTRAST_LEVELS = [0, 0.25, 0.5, 1]
+    config.process.TIME_STIMULUS = 0.2  # 0.5 s in paper
+    config.process.TIMEOUT_WAIT = 0.5  # 1.5 s in paper
+    config.process.GOCUE_WAIT = 0.2  # 0.7 s in paper
+    config.process.DT = 0.01  # 0.01 s in paper
 
-    config.training.NUM_EPOCHS_NEURALSYSTEM = 1e4
+    config.training.NUM_EPOCHS_NEURALSYSTEM = 1e5
     config.training.NUM_EPOCHS_CONTROLLER = 1e5
     config.training.BATCH_SIZE = 0
     config.training.LEARNING_RATE = 1e-4
@@ -37,7 +37,7 @@ def get_config():
 
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
-    config.perturbation.DROPOUT_PROBABILITIES = [0]  # , 0.1, 0.5, 0.7, 0.9]
+    config.perturbation.DROPOUT_PROBABILITIES = [0]
     config.perturbation.PERTURBATIONS = [('sensor', [1])]
 
     config.COMPUTE_GRAMIANS = False
