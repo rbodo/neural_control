@@ -39,7 +39,8 @@ from stable_baselines3.common.utils import zip_strict
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 from sb3_contrib.ppo_recurrent.policies import CnnLstmPolicy, MlpLstmPolicy, MultiInputLstmPolicy
 
-from src.control_systems_torch import RnnModel, ControlledRnn, ControlledMlp
+from src.control_systems_torch import RnnModel, ControlledRnn, ControlledMlp, \
+    RnnWithTimeconstant
 
 SelfRecurrentPPO = TypeVar("SelfRecurrentPPO", bound="RecurrentPPO")
 
@@ -568,6 +569,19 @@ class ControlledActorMlpRnnPolicy(MlpRnnPolicy):
 
 
 class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
+    def __init__(self, observation_space: gym.spaces.Space,
+                 action_space: gym.spaces.Space, lr_schedule: Schedule, *args,
+                 **kwargs):
+        dt = kwargs.pop('dt', 1)
+        super().__init__(observation_space, action_space, lr_schedule, *args,
+                         **kwargs)
+        self.lstm_actor = RnnWithTimeconstant(
+            dt, self.features_dim, kwargs['lstm_hidden_size'],
+            num_layers=kwargs['n_lstm_layers'], **self.lstm_kwargs)
+        # Setup optimizer again to include time constant weights.
+        self.optimizer = self.optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
+
     def _build_mlp_extractor(self) -> None:
         """
         Create the policy and value networks.
@@ -577,6 +591,7 @@ class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
             feature_dim=self.lstm_output_dim, net_arch=self.net_arch,
             activation_fn=self.activation_fn, device=self.device,
             controlled_mlp_class=self.net_arch['mlp_extractor_class'])
+        self.mlp_extractor.latent_dim_pi = self.mlp_extractor.policy_net.decoder.hidden_size
 
 
 class GeneralizedMlpExtractor(MlpExtractor):

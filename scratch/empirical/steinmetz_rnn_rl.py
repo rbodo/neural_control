@@ -68,6 +68,20 @@ def plot_trajectory(infos, path=None, show=True, ylim=None):
     return plt.gcf()
 
 
+def plot_activity(x, path=None, show=True):
+    plt.close()
+
+    if x is not None:
+        plt.plot(np.concatenate(x, 0))
+
+    if path is not None:
+        plt.savefig(path, bbox_inches='tight')
+    if show:
+        plt.show()
+
+    return plt.gcf()
+
+
 def set_weights_neuralsystem(model, device):
     weights = np.load('/home/bodrue/PycharmProjects/Thesis/empirical/'
                       'steinmetz_weights.npz')
@@ -75,10 +89,20 @@ def set_weights_neuralsystem(model, device):
     B = torch.tensor(weights['B'], device=device)
     b = torch.tensor(weights['b'], device=device)
     W = torch.tensor(weights['W'], device=device)
+    W_cnn = torch.tensor(weights['W_cnn'], device=device)
+    b_cnn = torch.tensor(weights['b_cnn'], device=device)
+    W_fc = torch.tensor(weights['W_fc'], device=device)
+    b_fc = torch.tensor(weights['b_fc'], device=device)
+    tau = torch.tensor(weights['tau'], device=device)
+    model.policy.features_extractor.cnn[0].weight.data = W_cnn
+    model.policy.features_extractor.cnn[0].bias.data = b_cnn
+    model.policy.features_extractor.linear[0].weight.data = W_fc
+    model.policy.features_extractor.linear[0].bias.data = b_fc
     model.policy.lstm_actor.weight_ih_l0.data = B
     model.policy.lstm_actor.weight_hh_l0.data = J
     model.policy.lstm_actor.bias_hh_l0.data = b
     model.policy.lstm_actor.bias_ih_l0.data[:] = 0
+    model.policy.lstm_actor.tau.data = tau
     model.policy.mlp_extractor.policy_net.neuralsystem[0].weight.data = W
     model.policy.lstm_actor.flatten_parameters()
 
@@ -161,10 +185,16 @@ class SteinmetzRlPipeline(LinearRlPipeline):
                                                deterministic=deterministic)
         f = None
         if filename is not None:
+            policy_net = self.model.policy.mlp_extractor.policy_net
+            policy_net.neuralsystem_outputs = []
             _, _, infos = run_single(env, self.model, return_infos=True)
             with sns.axes_style('ticks'):
                 f = plot_trajectory(infos, show=False, ylim=100)
             mlflow.log_figure(f, os.path.join('figures', filename))
+            f = plot_activity(policy_net.neuralsystem_outputs, show=False)
+            del policy_net.neuralsystem_outputs
+            mlflow.log_figure(f, os.path.join('figures',
+                                              'activity_' + filename))
         accuracy = np.mean(np.greater(final_rewards, 0)).item()
         mean_length = np.mean(episode_lengths).item()
         return accuracy, mean_length, f
@@ -183,7 +213,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
                                    gocue_wait=gocue_wait, dt=dt)
         return environment
 
-    def get_model(self, freeze_neuralsystem, freeze_controller, environment,
+    def get_model(self, freeze_actor, freeze_controller, environment,
                   load_weights_from=None) -> RecurrentPPO:
         neuralsystem_num_inputs = 32
         neuralsystem_num_states = 3
@@ -200,7 +230,8 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         dt = self.config.process.DT
         num_steps = int((time_stimulus + gocue_wait + timeout_wait) / dt)
         dtype = torch.float32
-        use_bidirectional_controller = True
+        use_bidirectional_controller = \
+            self.config.model.USE_BIDIRECTIONAL_CONTROLLER
 
         controller_num_inputs = neuralsystem_num_inputs
         if use_bidirectional_controller:
@@ -213,16 +244,22 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         if load_weights_from is None:
             controller.init_zero()
 
+        decoder = torch.nn.RNN(neuralsystem_num_states, 32, 2, dtype=dtype,
+                               device=self.device, nonlinearity=activation_rnn)
+
         policy_kwargs = {
             'lstm_hidden_size': neuralsystem_num_hidden,
             'n_lstm_layers': neuralsystem_num_layers,
-            'activation_fn': torch.nn.Tanh,
-            'net_arch': {'pi': [3], 'controller': controller,
+            'activation_fn': torch.nn.Identity,  # Applied at mlp_extractor
+            'net_arch': {'pi': [neuralsystem_num_states],
+                         'controller': controller,
+                         'decoder': decoder,
                          'mlp_extractor_class': BidirectionalControlledMlp if
                          use_bidirectional_controller else ControlledMlp},
             'features_extractor_class': CnnExtractor,
             'features_extractor_kwargs': {
-                'features_dim': neuralsystem_num_inputs}
+                'features_dim': neuralsystem_num_inputs},
+            'dt': 0.1#dt
         }
         log_dir = get_artifact_path('tensorboard_log')
         model = RecurrentPPO(
@@ -237,12 +274,14 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         else:
             model.set_parameters(load_weights_from)
 
-        controller.requires_grad_(not freeze_controller)
-        model.policy.action_net.requires_grad_(not freeze_neuralsystem)
-        model.policy.features_extractor.requires_grad_(not freeze_neuralsystem)
+        model.policy.features_extractor.requires_grad_(False)
         model.policy.lstm_actor.requires_grad_(False)
         model.policy.mlp_extractor.policy_net.neuralsystem.requires_grad_(
             False)
+        controller.requires_grad_(not freeze_controller)
+        model.policy.mlp_extractor.policy_net.decoder.requires_grad_(
+            not freeze_actor)
+        model.policy.action_net.requires_grad_(not freeze_actor)
 
         return model
 
@@ -259,29 +298,31 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         environment = self.get_environment(rng=rng)
 
         # Create model consisting of neural system, controller, and RL agent.
-        is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
+        is_perturbed = perturbation_type in ['linear', 'random', 'noise']
         if is_perturbed:
             freeze_neuralsystem = True
             freeze_controller = False
+            freeze_actor = False#
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment,
+                freeze_actor, freeze_controller, environment,
                 load_weights_from=path_model)
             num_epochs = int(self.config.training.NUM_EPOCHS_CONTROLLER)
         else:
-            freeze_neuralsystem = False
+            freeze_neuralsystem = True  # Use pretrained weights.
             freeze_controller = True
+            freeze_actor = False
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment)
+                freeze_actor, freeze_controller, environment)
             num_epochs = int(self.config.training.NUM_EPOCHS_NEURALSYSTEM)
 
         controlled_neuralsystem = self.model.policy.mlp_extractor.policy_net
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
-            self.apply_perturbation(rng)
+            self.apply_perturbation(perturbation_type)
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
@@ -312,7 +353,9 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         self.model.learn(num_epochs, callback=callbacks)
 
         controlled_neuralsystem.assert_plasticity(
-            dict(controller=freeze_controller))
+            dict(controller=freeze_controller,
+                 neuralsystem=freeze_neuralsystem,
+                 decoder=freeze_actor))
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
@@ -320,15 +363,27 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             self.model.save(path_model)
             logging.info(f"Saved model to {path_model}.")
 
-    def apply_perturbation(self, rng: np.random.Generator):
+    # def apply_perturbation(self, rng: np.random.Generator):
+    #     with torch.no_grad():
+    #         w = self.model.policy.mlp_extractor.policy_net.neuralsystem[0].weight
+    #         w_np = w.data.cpu().numpy()
+    #         rng.shuffle(w_np)
+    #         w.data[:] = torch.tensor(w_np, device=self.device)
+    #         w.requires_grad_(False)
+    #         # self.model.policy.lstm_actor.weight_ih_l0.data[:] = 0
+    #         # self.model.policy.lstm_actor.weight_ih_l0.data[:] *= -0.001
+
+    def apply_perturbation(self, kind='linear', perturbation_level=1):
         with torch.no_grad():
-            w = self.model.policy.mlp_extractor.policy_net.neuralsystem[0].weight
-            w_np = w.data.cpu().numpy()
-            rng.shuffle(w_np)
-            w.data[:] = torch.tensor(w_np, device=self.device)
-            w.requires_grad_(False)
-            # self.model.policy.lstm_actor.weight_ih_l0.data[:] = 0
-            # self.model.policy.lstm_actor.weight_ih_l0.data[:] *= -0.001
+            w = self.model.policy.lstm_actor.weight_ih_l0.data
+            if kind == 'linear':
+                w[:] = w * (1 - perturbation_level)
+            elif kind == 'random':
+                w[:] = torch.rand_like(w) * perturbation_level
+            elif kind == 'noise':
+                w[:] = w + torch.randn_like(w) * w.std() * perturbation_level
+            else:
+                raise NotImplementedError
 
 
 if __name__ == '__main__':

@@ -79,7 +79,7 @@ class RnnModel(nn.Module):
             else [self.num_layers, self.num_hidden]
         return torch.zeros(*shape, **self.tkwargs)
 
-    def forward(self, x: torch.Tensor, h: torch.Tensor
+    def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
                 ) -> Tuple[torch.Tensor, torch.Tensor]:
         output, hidden = self.rnn(x, h)
         decoded = self.activation(self.decoder(output))
@@ -306,9 +306,10 @@ class ControlledRnn(ControlledNeuralSystem):
 
 class ControlledMlp(ControlledNeuralSystem):
     """Perturbed MLP stabilized by a controller RNN."""
-    def __init__(self, mlp: nn.Module, controller: RnnModel,
+    def __init__(self, mlp: nn.Module, controller: RnnModel, decoder: nn.RNN,
                  a_max: Optional[float] = None):
         super().__init__(mlp, controller)
+        self.decoder = decoder
         self.a_max = a_max
 
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
@@ -323,10 +324,19 @@ class ControlledMlp(ControlledNeuralSystem):
             controller_output = torch.clip(controller_output, max=self.a_max)
             neuralsystem_outputs.append(neuralsystem_output +
                                         controller_output)
-        return torch.concat(neuralsystem_outputs, dim=0)
+        z = torch.concat(neuralsystem_outputs, dim=0)
+        if hasattr(self, 'neuralsystem_outputs'):
+            self.neuralsystem_outputs.append(z.detach().cpu().numpy())
+        return self.decoder(z)[0]
 
     def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
         return self.controller.begin_state(batch_size)
+
+    def get_weight_hash(self) -> Dict[str, List[int]]:
+        """Get the hash values of the model parameters."""
+        return {'neuralsystem': to_hash(self.neuralsystem.parameters()),
+                'controller': to_hash(self.controller.parameters()),
+                'decoder': to_hash(self.decoder.parameters())}
 
 
 class BidirectionalControlledMlp(ControlledMlp):
@@ -347,7 +357,42 @@ class BidirectionalControlledMlp(ControlledMlp):
             controller_output = torch.clip(controller_output, max=self.a_max)
             neuralsystem_outputs.append(neuralsystem_output +
                                         controller_output)
-        return torch.concat(neuralsystem_outputs, dim=0)
+        z = torch.concat(neuralsystem_outputs, dim=0)
+        if hasattr(self, 'neuralsystem_outputs'):
+            self.neuralsystem_outputs.append(z.detach().cpu().numpy())
+        return self.decoder(z)[0]
+
+
+class RnnWithTimeconstant(nn.RNN):
+    def __init__(self, dt: float, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tau = nn.Parameter(torch.rand((self.hidden_size,),
+                                           dtype=torch.float32) + 0.5)
+        self.dt = dt
+        if self.nonlinearity == 'relu':
+            self.activation = nn.ReLU()
+        elif self.nonlinearity == 'tanh':
+            self.activation = nn.Tanh()
+        elif self.nonlinearity in ['linear', None]:
+            self.activation = nn.Identity()
+        else:
+            raise NotImplementedError
+        if self.num_layers > 1:
+            raise NotImplementedError
+
+    def forward(self, x, h=None):
+        num_timesteps, batch_size, num_features = x.shape
+        if h is None:
+            h = torch.zeros(self.num_layers, batch_size, self.hidden_size,
+                            dtype=x.dtype, device=x.device)
+        outputs = []
+        for t in range(num_timesteps):
+            h = ((1 - self.dt / self.tau) * h + self.dt / self.tau * (
+                self.activation(h) @ self.weight_hh_l0.T +
+                x[t:t+1, :] @ self.weight_ih_l0.T +
+                self.bias_hh_l0 + self.bias_ih_l0))
+            outputs.append(h[0])  # Remove layer dimension
+        return nn.Tanh()(torch.stack(outputs)), h
 
 
 class DiMlp(MLP):
@@ -605,7 +650,7 @@ class SteinmetzGym(StatefulGym):
 
     def __init__(self, contrast_levels: List[float],
                  time_stimulus=50, timeout_wait=150, gocue_wait=50, dt=1,
-                 render_mode=None):
+                 action_type='velocity', render_mode=None):
         super().__init__(dt)
         assert render_mode is None \
             or render_mode in self.metadata['render_modes']
@@ -626,10 +671,11 @@ class SteinmetzGym(StatefulGym):
         self._max_shift = 90
         self._padx = None
         self._padded_stimulus = None
-        self._tanh_to_pixel = self._max_shift
+        self._tanh_to_pixel = 1e4
         self.observation_space = spaces.Box(0, 1, (1, self._stimulus_height,
                                                    self._stimulus_width))
         self.action_space = spaces.Box(-1, 1, (1,))
+        self.action_type = action_type
 
     @property
     def is_post_stimulus(self):
@@ -683,8 +729,15 @@ class SteinmetzGym(StatefulGym):
         return int(f(self._tanh_to_pixel * x).item())
 
     def _update_stimulus_position(self, action: float):
-        if self.is_post_gocue:
-            self._stimulus_x += self.tanh_to_pixel(action)
+        if not self.is_post_gocue:
+            return
+
+        if self.action_type == 'position':
+            self._stimulus_x = round(action)
+        elif self.action_type == 'velocity':
+            self._stimulus_x += int(self.tanh_to_pixel(action) * self.dt)
+        else:
+            raise NotImplementedError
 
     def _get_obs(self):
         self._padded_stimulus = self._get_background()
@@ -731,11 +784,14 @@ class SteinmetzGym(StatefulGym):
                     contrast_left == contrast_right == 0):
                 return contrast_left, contrast_right
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, **kwargs):
         super().reset(seed=seed)
 
         contrast_left, contrast_right = self._sample_contrast(
             allow_equal=False)
+        # Overwrite contrast values if provided by user.
+        contrast_left = kwargs.pop('contrast_left', contrast_left)
+        contrast_right = kwargs.pop('contrast_right', contrast_right)
 
         gabor = get_gabor()
         self._gabor_left = apply_contrast(gabor, contrast_left)
