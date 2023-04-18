@@ -244,7 +244,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         if load_weights_from is None:
             controller.init_zero()
 
-        decoder = torch.nn.RNN(neuralsystem_num_states, 32, 2, dtype=dtype,
+        decoder = torch.nn.RNN(neuralsystem_num_states, 64, 1, dtype=dtype,
                                device=self.device, nonlinearity=activation_rnn)
 
         policy_kwargs = {
@@ -254,6 +254,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             'net_arch': {'pi': [neuralsystem_num_states],
                          'controller': controller,
                          'decoder': decoder,
+                         'a_max': 6.25,
                          'mlp_extractor_class': BidirectionalControlledMlp if
                          use_bidirectional_controller else ControlledMlp},
             'features_extractor_class': CnnExtractor,

@@ -616,8 +616,9 @@ class ControlledMlpExtractor(GeneralizedMlpExtractor):
         device: Union[th.device, str] = "auto",
     ) -> None:
         super().__init__(feature_dim, net_arch, activation_fn, device)
-        self.policy_net = controlled_mlp_class(self.policy_net,
-                                               net_arch['controller'], 6.25)
+        self.policy_net = controlled_mlp_class(
+            self.policy_net, net_arch['controller'], net_arch['decoder'],
+            net_arch['a_max'])
 
 
 class CnnExtractor(BaseFeaturesExtractor):

@@ -7,9 +7,9 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = '6'
+    config.GPU = '7'
     config.EXPERIMENT_NAME = 'steinmetz_rnn_rl'
-    config.RESUME_EXPERIMENT = 'bidirectional_larger'  # 2023-03-16'
+    config.RESUME_EXPERIMENT = 'bidirectional6'  # 2023-03-16'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
@@ -33,8 +33,8 @@ def get_config():
     config.model.ACTIVATION = 'tanh'
     config.model.NUM_HIDDEN_NEURALSYSTEM = 18
     config.model.NUM_LAYERS_NEURALSYSTEM = 1
-    config.model.NUM_HIDDEN_CONTROLLER = 32
-    config.model.NUM_LAYERS_CONTROLLER = 2
+    config.model.NUM_HIDDEN_CONTROLLER = 30
+    config.model.NUM_LAYERS_CONTROLLER = 1
 
     config.perturbation = CfgNode()
     config.perturbation.SKIP_PERTURBATION = False
