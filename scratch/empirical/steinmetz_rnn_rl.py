@@ -213,8 +213,8 @@ class SteinmetzRlPipeline(LinearRlPipeline):
                                    gocue_wait=gocue_wait, dt=dt)
         return environment
 
-    def get_model(self, freeze_actor, freeze_controller, environment,
-                  load_weights_from=None) -> RecurrentPPO:
+    def get_model(self, freeze_neuralsystem, freeze_actor, freeze_controller,
+                  environment, load_weights_from=None) -> RecurrentPPO:
         neuralsystem_num_inputs = 32
         neuralsystem_num_states = 3
         neuralsystem_num_hidden = self.config.model.NUM_HIDDEN_NEURALSYSTEM
@@ -275,10 +275,10 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         else:
             model.set_parameters(load_weights_from)
 
-        model.policy.features_extractor.requires_grad_(False)
-        model.policy.lstm_actor.requires_grad_(False)
+        model.policy.features_extractor.requires_grad_(not freeze_neuralsystem)
+        model.policy.lstm_actor.requires_grad_(not freeze_neuralsystem)
         model.policy.mlp_extractor.policy_net.neuralsystem.requires_grad_(
-            False)
+            not freeze_neuralsystem)
         controller.requires_grad_(not freeze_controller)
         model.policy.mlp_extractor.policy_net.decoder.requires_grad_(
             not freeze_actor)
@@ -302,21 +302,22 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         is_perturbed = perturbation_type in ['linear', 'random', 'noise']
         if is_perturbed:
             freeze_neuralsystem = True
-            freeze_controller = False
             freeze_actor = False#
+            freeze_controller = False
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_actor, freeze_controller, environment,
-                load_weights_from=path_model)
+                freeze_neuralsystem, freeze_actor, freeze_controller,
+                environment, load_weights_from=path_model)
             num_epochs = int(self.config.training.NUM_EPOCHS_CONTROLLER)
         else:
             freeze_neuralsystem = True  # Use pretrained weights.
-            freeze_controller = True
             freeze_actor = False
+            freeze_controller = True
             self.model = self.get_model(
-                freeze_actor, freeze_controller, environment)
+                freeze_neuralsystem, freeze_actor, freeze_controller,
+                environment)
             num_epochs = int(self.config.training.NUM_EPOCHS_NEURALSYSTEM)
 
         controlled_neuralsystem = self.model.policy.mlp_extractor.policy_net

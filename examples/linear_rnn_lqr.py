@@ -80,7 +80,8 @@ class NeuralPerturbationPipeline(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_model(self, freeze_neuralsystem: bool, freeze_controller: bool,
+    def get_model(self, freeze_neuralsystem: bool, freeze_actor: bool,
+                  freeze_controller: bool,
                   environment: Union[gym.Env, mx.gluon.HybridBlock],
                   load_weights_from: Optional[str] = None
                   ) -> ControlledNeuralSystem:
@@ -93,6 +94,8 @@ class NeuralPerturbationPipeline(ABC):
         freeze_neuralsystem
             Whether to train the neural system. Usually turned off while
             perturbing the neural system and training the controller.
+        freeze_actor
+            Whether to train the actor.
         freeze_controller
             Whether to train the controller. Usually turned off while training
             the neural system.
@@ -348,7 +351,7 @@ class LqrPipeline(NeuralPerturbationPipeline):
         return DI(num_inputs, num_outputs, num_states, self.device,
                   process_noise, observation_noise, dt, prefix='environment_')
 
-    def get_model(self, freeze_neuralsystem, freeze_controller,
+    def get_model(self, freeze_neuralsystem, freeze_actor, freeze_controller,
                   environment: StochasticLinearIOSystem,
                   load_weights_from: Optional[str] = None
                   ) -> Union[ControlledNeuralSystem,
@@ -437,14 +440,14 @@ class LqrPipeline(NeuralPerturbationPipeline):
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment,
+                freeze_neuralsystem, False, freeze_controller, environment,
                 load_weights_from=path_model)
             num_epochs = self.config.training.NUM_EPOCHS_CONTROLLER
         else:
             freeze_neuralsystem = False
             freeze_controller = True
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment)
+                freeze_neuralsystem, False, freeze_controller, environment)
             num_epochs = self.config.training.NUM_EPOCHS_NEURALSYSTEM
 
         # Apply perturbation to neural system.

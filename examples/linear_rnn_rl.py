@@ -262,8 +262,8 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         environment = TimeLimit(environment, num_steps)
         return environment
 
-    def get_model(self, freeze_neuralsystem, freeze_controller, environment,
-                  load_weights_from=None) -> RecurrentPPO:
+    def get_model(self, freeze_neuralsystem, freeze_actor, freeze_controller,
+                  environment, load_weights_from=None) -> RecurrentPPO:
         neuralsystem_num_states = self.config.model.NUM_HIDDEN_NEURALSYSTEM
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
         controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
@@ -300,10 +300,10 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         if load_weights_from is not None:
             model.set_parameters(load_weights_from)
 
-        controller.requires_grad_(not freeze_controller)
-        model.policy.action_net.requires_grad_(not freeze_neuralsystem)
         model.policy.lstm_actor.neuralsystem.requires_grad_(
             not freeze_neuralsystem)
+        model.policy.action_net.requires_grad_(not freeze_actor)
+        controller.requires_grad_(not freeze_controller)
 
         return model
 
@@ -326,19 +326,22 @@ class LinearRlPipeline(NeuralPerturbationPipeline):
         is_perturbed = perturbation_type in ['sensor', 'actuator', 'processor']
         if is_perturbed:
             freeze_neuralsystem = True
+            freeze_actor = True
             freeze_controller = False
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
             path_model = self.config.paths.FILEPATH_MODEL
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment,
-                load_weights_from=path_model)
+                freeze_neuralsystem, freeze_actor, freeze_controller,
+                environment, load_weights_from=path_model)
             num_epochs = int(self.config.training.NUM_EPOCHS_CONTROLLER)
         else:
             freeze_neuralsystem = False
+            freeze_actor = False
             freeze_controller = True
             self.model = self.get_model(
-                freeze_neuralsystem, freeze_controller, environment)
+                freeze_neuralsystem, freeze_actor, freeze_controller,
+                environment)
             num_epochs = int(self.config.training.NUM_EPOCHS_NEURALSYSTEM)
 
         controlled_neuralsystem = self.model.policy.lstm_actor
