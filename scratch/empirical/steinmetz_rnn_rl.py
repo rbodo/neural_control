@@ -22,7 +22,21 @@ from src.ppo_recurrent import (RecurrentPPO, ControlledExtractorMlpRnnPolicy,
 from src.utils import get_artifact_path
 
 
-def plot_trajectory(infos, path=None, show=True, ylim=None):
+class QuadraticDecoder(torch.nn.Module):
+    def __init__(self, a, b, device):
+        super().__init__()
+        self.a = a
+        self.b = b
+        self.device = device
+
+    def forward(self, x):
+        y = []
+        for xt in x:
+            y.append(self.a * xt * (self.b * xt - 1))
+        return torch.unsqueeze(torch.stack(y, 0), 0)
+
+
+def plot_trajectory(infos, z, path=None, show=True, ylim=None):
 
     plt.close()
 
@@ -41,45 +55,38 @@ def plot_trajectory(infos, path=None, show=True, ylim=None):
     correct_response *= 90
     reward = info['reward']
 
-    # Draw trajectory.
-    plt.plot(times, positions, label='Wheel position')
-    plt.hlines(correct_response, time_gocue, time_end,
-               linestyle='--', color='k', label='Target')
-    plt.axvline(time_stimulus, linestyle=':', color='k')
-    plt.axvline(time_gocue, linestyle=':', color='k')
-    plt.axvline(time_end, linestyle=':', color='k')
-    plt.xlabel('Time [s]')
-    plt.ylabel('Stimulus position [dva]')
-    if reward > 0:
-        plt.title(f'Response: {responses[-1]} (correct).', dict(color='green'))
-    else:
-        plt.title(f'Response: {responses[-1]} (false).', dict(color='red'))
+    fig, (ax0, ax1) = plt.subplots(2, sharex='all')
 
-    plt.legend()
+    # Draw trajectory.
+    ax0.plot(times, positions, label='Wheel position')
+    ax0.hlines(correct_response, time_gocue, time_end,
+               linestyle='--', color='k', label='Target')
+    ax0.axvline(time_stimulus, linestyle=':', color='k')
+    ax0.axvline(time_gocue, linestyle=':', color='k')
+    ax0.axvline(time_end, linestyle=':', color='k')
+    ax0.set_ylabel('Stimulus position [dva]')
+    if reward > 0:
+        ax0.set_title(f'Response: {responses[-1]} (correct).',
+                      dict(color='green'))
+    else:
+        ax0.set_title(f'Response: {responses[-1]} (false).', dict(color='red'))
+
+    ax1.plot(times, np.concatenate(z, 0))
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Firing rate [a.u.]')
+
+    ax0.legend()
 
     if ylim is not None:
-        plt.ylim(-ylim, ylim)
+        ax0.set_ylim(-ylim, ylim)
+        ax1.set_ylim(0, 10)
 
     if path is not None:
         plt.savefig(path, bbox_inches='tight')
     if show:
         plt.show()
 
-    return plt.gcf()
-
-
-def plot_activity(x, path=None, show=True):
-    plt.close()
-
-    if x is not None:
-        plt.plot(np.concatenate(x, 0))
-
-    if path is not None:
-        plt.savefig(path, bbox_inches='tight')
-    if show:
-        plt.show()
-
-    return plt.gcf()
+    return fig
 
 
 def set_weights_neuralsystem(model, device):
@@ -105,6 +112,18 @@ def set_weights_neuralsystem(model, device):
     model.policy.lstm_actor.tau.data = tau
     model.policy.mlp_extractor.policy_net.neuralsystem[0].weight.data = W
     model.policy.lstm_actor.flatten_parameters()
+    use_quadratic_decoder = False
+    if use_quadratic_decoder:
+        weights = dict(np.load('/home/bodrue/PycharmProjects/Thesis/empirical/'
+                               'steinmetz_weights_decoder.npz'))
+        W = torch.tensor(weights.pop('W'), device=device)
+        b = torch.tensor(weights.pop('b'), device=device)
+        model.policy.action_net.weight.data = W
+        model.policy.action_net.bias.data = b
+        for k, v in weights.items():
+            getattr(model.policy.mlp_extractor.policy_net.decoder, k).data = \
+                torch.tensor(v, device=device)
+        model.policy.mlp_extractor.policy_net.decoder.flatten_parameters()
 
 
 class EvaluationCallback(BaseCallback):
@@ -189,12 +208,10 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             policy_net.neuralsystem_outputs = []
             _, _, infos = run_single(env, self.model, return_infos=True)
             with sns.axes_style('ticks'):
-                f = plot_trajectory(infos, show=False, ylim=100)
+                f = plot_trajectory(infos, policy_net.neuralsystem_outputs,
+                                    show=False, ylim=100)
             mlflow.log_figure(f, os.path.join('figures', filename))
-            f = plot_activity(policy_net.neuralsystem_outputs, show=False)
             del policy_net.neuralsystem_outputs
-            mlflow.log_figure(f, os.path.join('figures',
-                                              'activity_' + filename))
         accuracy = np.mean(np.greater(final_rewards, 0)).item()
         mean_length = np.mean(episode_lengths).item()
         return accuracy, mean_length, f
@@ -260,7 +277,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             'features_extractor_class': CnnExtractor,
             'features_extractor_kwargs': {
                 'features_dim': neuralsystem_num_inputs},
-            'dt': 0.1#dt
+            'dt': dt
         }
         log_dir = get_artifact_path('tensorboard_log')
         model = RecurrentPPO(
