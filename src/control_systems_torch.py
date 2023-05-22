@@ -653,7 +653,7 @@ class SteinmetzGym(StatefulGym):
                  action_type='velocity', render_mode=None):
         super().__init__(dt)
         assert render_mode is None \
-            or render_mode in self.metadata['render_modes']
+               or render_mode in self.metadata['render_modes']
         self.render_mode = render_mode
         self._contrast_levels = np.array(contrast_levels)
         self._correct_response = None
@@ -704,7 +704,7 @@ class SteinmetzGym(StatefulGym):
 
     @property
     def is_terminated(self):
-        return self.is_response_registered or self.is_timeout
+        return self.is_timeout  # or self.is_response_registered
 
     def _get_background(self):
         return np.zeros((self._stimulus_height,
@@ -729,7 +729,7 @@ class SteinmetzGym(StatefulGym):
         return int(f(self._tanh_to_pixel * x).item())
 
     def _update_stimulus_position(self, action: float):
-        if not self.is_post_gocue:
+        if not self.is_post_gocue or self.is_response_registered:
             return
 
         if self.action_type == 'position':
@@ -807,6 +807,9 @@ class SteinmetzGym(StatefulGym):
         self.time = 0
         self._time_gocue = (self.np_random.random(1) * self._gocue_wait +
                             2 * self._time_stimulus)
+        # Overwrite gocue values if provided by user.
+        self._time_gocue = kwargs.pop('time_gocue', self._time_gocue)
+
         self._time_end = self._time_gocue + self._timeout_wait
 
         observation = self._get_obs()
@@ -820,7 +823,7 @@ class SteinmetzGym(StatefulGym):
     def step(self, action):
         self.time += self.dt
 
-        self._update_stimulus_position(action)
+        self._update_stimulus_position(action.item())
 
         observation = self._get_obs()
 
