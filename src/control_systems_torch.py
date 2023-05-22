@@ -733,7 +733,9 @@ class SteinmetzGym(StatefulGym):
             return
 
         if self.action_type == 'position':
-            self._stimulus_x = round(action)
+            # The origin of the stimulus position is internally offset.
+            self._stimulus_x = round(self._max_shift * (1 + action))
+            # self._stimulus_x = round(self._max_shift + action)
         elif self.action_type == 'velocity':
             self._stimulus_x += int(self.tanh_to_pixel(action) * self.dt)
         else:
