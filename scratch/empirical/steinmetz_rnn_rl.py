@@ -89,9 +89,9 @@ def plot_trajectory(infos, z, path=None, show=True, ylim=None):
     return fig
 
 
-def set_weights_neuralsystem(model, device):
-    weights = np.load('/home/bodrue/PycharmProjects/Thesis/empirical/'
-                      'steinmetz_weights.npz')
+def set_weights_neuralsystem(model, device, filename, load_decoder=False):
+    path = '/home/bodrue/PycharmProjects/Thesis/empirical'
+    weights = np.load(f'{path}/{filename}.npz')
     J = torch.tensor(weights['J'], device=device)
     B = torch.tensor(weights['B'], device=device)
     b = torch.tensor(weights['b'], device=device)
@@ -112,10 +112,8 @@ def set_weights_neuralsystem(model, device):
     model.policy.lstm_actor.tau.data = tau
     model.policy.mlp_extractor.policy_net.neuralsystem[0].weight.data = W
     model.policy.lstm_actor.flatten_parameters()
-    use_quadratic_decoder = False
-    if use_quadratic_decoder:
-        weights = dict(np.load('/home/bodrue/PycharmProjects/Thesis/empirical/'
-                               'steinmetz_weights_decoder.npz'))
+    if load_decoder:
+        weights = dict(np.load(f'{path}/steinmetz_weights_decoder.npz'))
         W = torch.tensor(weights.pop('W'), device=device)
         b = torch.tensor(weights.pop('b'), device=device)
         model.policy.action_net.weight.data = W
@@ -227,13 +225,14 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         environment = SteinmetzGym(contrast_levels=contrast_levels,
                                    time_stimulus=time_stimulus,
                                    timeout_wait=timeout_wait,
-                                   gocue_wait=gocue_wait, dt=dt)
+                                   gocue_wait=gocue_wait, dt=dt,
+                                   action_type=kwargs.get('action_type', None))
         return environment
 
     def get_model(self, freeze_neuralsystem, freeze_actor, freeze_controller,
                   environment, load_weights_from=None) -> RecurrentPPO:
         neuralsystem_num_inputs = 32
-        neuralsystem_num_states = 3
+        neuralsystem_num_states = len(self.config.data.AREAS)
         neuralsystem_num_hidden = self.config.model.NUM_HIDDEN_NEURALSYSTEM
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
         controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
@@ -288,7 +287,9 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             batch_size=None)
 
         if load_weights_from is None:
-            set_weights_neuralsystem(model, self.device)
+            set_weights_neuralsystem(model, self.device,
+                                     self.config.paths.MODEL_NAME,
+                                     load_decoder=False)
         else:
             model.set_parameters(load_weights_from)
 
@@ -313,7 +314,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         num_test = self.config.training.NUM_TEST
 
         # Create environment.
-        environment = self.get_environment(rng=rng)
+        environment = self.get_environment(rng=rng, action_type='velocity')
 
         # Create model consisting of neural system, controller, and RL agent.
         is_perturbed = perturbation_type in ['linear', 'random', 'noise']

@@ -7,18 +7,23 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = '9'
+    config.GPU = '8'
     config.EXPERIMENT_NAME = 'steinmetz_rnn_rl'
-    config.RESUME_EXPERIMENT = 'bidirectional_motor35'  # 2023-03-16'
+    config.RESUME_EXPERIMENT = 'bidirectional_motor64'  # 2023-03-16'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
     config.paths.BASE_PATH = base_path
+    config.paths.MODEL_NAME = 'steinmetz_weights_motor'
 
     # Data
     config.data = CfgNode()
-    config.data.AREAS = ['MOp']  # ['VISl', 'VISp', 'VISrl']
-    config.data.SUBJECT_INDEX = 10  # 9
+    # config.data.AREAS = ['VISa', 'VISp', 'LD', 'LP', 'PO', 'CA1', 'CA3', 'DG', 'SUB', 'ILA', 'MOs', 'PL', 'TT', 'LSr']
+    # config.data.SUBJECT_INDEX = 7
+    config.data.AREAS = ['MOp']
+    config.data.SUBJECT_INDEX = 10
+    # config.data.AREAS = ['VISl', 'VISp', 'VISrl']
+    # config.data.SUBJECT_INDEX = 9
 
     # Environment
     config.process.CONTRAST_LEVELS = [0, 0.25, 0.5, 1]
