@@ -671,11 +671,16 @@ class SteinmetzGym(StatefulGym):
         self._max_shift = 90
         self._padx = None
         self._padded_stimulus = None
-        self._tanh_to_pixel = 1e4
+        self._tanh_to_pixel = 1e3
         self.observation_space = spaces.Box(0, 1, (1, self._stimulus_height,
                                                    self._stimulus_width))
-        self.action_space = spaces.Box(-1, 1, (1,))
         self.action_type = action_type
+        if self.action_type == 'position':
+            self.action_space = spaces.Box(-1, 1, (1,))
+        elif self.action_type == 'velocity':
+            self.action_space = spaces.Discrete(3, start=-1)
+        else:
+            raise NotImplementedError
 
     @property
     def is_post_stimulus(self):
