@@ -591,7 +591,7 @@ class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
             feature_dim=self.lstm_output_dim, net_arch=self.net_arch,
             activation_fn=self.activation_fn, device=self.device,
             controlled_mlp_class=self.net_arch['mlp_extractor_class'])
-        self.mlp_extractor.latent_dim_pi = self.mlp_extractor.policy_net.decoder.hidden_size
+        self.mlp_extractor.latent_dim_pi = self.mlp_extractor.policy_net.decoder[1].hidden_size
 
 
 class GeneralizedMlpExtractor(MlpExtractor):

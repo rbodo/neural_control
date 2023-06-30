@@ -111,6 +111,7 @@ def set_weights_neuralsystem(model, device, filename, load_decoder=False):
     model.policy.lstm_actor.bias_ih_l0.data[:] = 0
     model.policy.lstm_actor.tau.data = tau
     model.policy.mlp_extractor.policy_net.neuralsystem[0].weight.data = W
+    # model.policy.mlp_extractor.policy_net.neuralsystem[0].bias.data = torch.tensor([-4.], device=device)
     model.policy.lstm_actor.flatten_parameters()
     if load_decoder:
         weights = dict(np.load(f'{path}/steinmetz_weights_decoder.npz'))
@@ -122,6 +123,8 @@ def set_weights_neuralsystem(model, device, filename, load_decoder=False):
             getattr(model.policy.mlp_extractor.policy_net.decoder, k).data = \
                 torch.tensor(v, device=device)
         model.policy.mlp_extractor.policy_net.decoder.flatten_parameters()
+    # model.policy.action_net.weight.data = torch.tensor([[1.]], device=device)
+    # model.policy.mlp_extractor.policy_net.decoder.bias.data = torch.tensor([-4.], device=device)
 
 
 class EvaluationCallback(BaseCallback):
@@ -158,14 +161,26 @@ class EvaluationCallback(BaseCallback):
         self.n_calls = 0
 
 
-def run_n(n: int, *args, **kwargs) -> Tuple[list, list]:
+def run_n(n: int, env, model, **kwargs) -> Tuple[list, list]:
     """Run an RL agent for `n` episodes and return reward and run lengths."""
     final_rewards = []
     episode_lengths = []
+    outputs = []
+    labels = []
+    policy_net = model.policy.mlp_extractor.policy_net
     for i in range(n):
-        states, rewards = run_single(*args, **kwargs)
+        policy_net.neuralsystem_outputs = []
+        states, rewards, infos = run_single(env, model, return_infos=True,
+                                            **kwargs)
         final_rewards.append(rewards[-1])
         episode_lengths.append(len(rewards))
+        outputs.append(policy_net.neuralsystem_outputs)
+        labels.append(infos[-1]['correct_response'])
+        del policy_net.neuralsystem_outputs
+    # fig, axes = plt.subplots(ncols=3, sharex='all', sharey='all')
+    # for output, label in zip(outputs, labels):
+    #     axes[int(label)].plot(np.concatenate(output), c='steelblue')
+    # plt.show()
     return final_rewards, episode_lengths
 
 
@@ -237,6 +252,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         neuralsystem_num_layers = self.config.model.NUM_LAYERS_NEURALSYSTEM
         controller_num_states = self.config.model.NUM_HIDDEN_CONTROLLER
         controller_num_layers = self.config.model.NUM_LAYERS_CONTROLLER
+        batch_size = 1
         activation_rnn = self.config.model.ACTIVATION
         activation_decoder = 'relu'  # Defaults to 'linear'
         learning_rate = self.config.training.LEARNING_RATE
@@ -260,8 +276,16 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         if load_weights_from is None:
             controller.init_zero()
 
-        decoder = torch.nn.RNN(neuralsystem_num_states, 64, 1, dtype=dtype,
-                               device=self.device, nonlinearity=activation_rnn)
+        # decoder = QuadraticDecoder(a=8, b=0.2, device=self.device)
+        # decoder = torch.nn.Identity()
+        batchnorm = torch.nn.BatchNorm1d(neuralsystem_num_states)
+        decoder = torch.nn.GRU(neuralsystem_num_states, 32, 2, dtype=dtype,
+                               device=self.device)
+        # decoder = torch.nn.RNN(neuralsystem_num_states, 32, 1, dtype=dtype,
+        #                        device=self.device, nonlinearity=activation_rnn)
+        decoder = torch.nn.Sequential(batchnorm, decoder)
+        # decoder = torch.nn.Sequential(batchnorm, GetFirst())
+        # decoder = batchnorm
 
         policy_kwargs = {
             'lstm_hidden_size': neuralsystem_num_hidden,
@@ -282,8 +306,8 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         model = RecurrentPPO(
             ControlledExtractorMlpRnnPolicy, environment, verbose=0,
             device=self.device, seed=self.config.SEED, tensorboard_log=log_dir,
-            policy_kwargs=policy_kwargs, n_epochs=10, n_steps=num_steps,
-            learning_rate=linear_schedule(learning_rate, 0.005),
+            policy_kwargs=policy_kwargs, n_epochs=10, n_steps=num_steps * batch_size,
+            learning_rate=linear_schedule(learning_rate, 0.005), ent_coef=0,
             batch_size=None)
 
         if load_weights_from is None:
@@ -375,7 +399,8 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         controlled_neuralsystem.assert_plasticity(
             dict(controller=freeze_controller,
                  neuralsystem=freeze_neuralsystem,
-                 decoder=freeze_actor))
+                 #decoder=freeze_actor,
+                 ))
 
         if save_model:
             path_model = get_artifact_path('models/rnn.params')
