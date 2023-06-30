@@ -52,7 +52,7 @@ def plot_trajectory(infos, z, path=None, show=True, ylim=None):
     time_gocue = info['time_gocue']
     time_end = min(info['time_end'], info['time'])  # May have stopped early.
     correct_response = info['correct_response'] or 0
-    correct_response *= 90
+    correct_response *= -90  # Target is on the opposite side
     reward = info['reward']
 
     fig, (ax0, ax1) = plt.subplots(2, sharex='all')

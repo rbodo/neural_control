@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 from gymnasium.core import RenderFrame, ActType, ObsType
 from skimage.filters import gabor_kernel
@@ -678,7 +678,7 @@ class SteinmetzGym(StatefulGym):
         if self.action_type == 'position':
             self.action_space = spaces.Box(-1, 1, (1,))
         elif self.action_type == 'velocity':
-            self.action_space = spaces.Discrete(3, start=-1)
+            self.action_space = spaces.Discrete(3, start=0)
         else:
             raise NotImplementedError
 
@@ -697,9 +697,9 @@ class SteinmetzGym(StatefulGym):
     def _get_response(self):
         """Returns None if no response was registered before timeout."""
         if self._stimulus_x <= 0:
-            return -1
-        if self._stimulus_x >= 2 * self._max_shift:
             return 1
+        if self._stimulus_x >= 2 * self._max_shift:
+            return -1
         if self.is_timeout:
             return 0
 
@@ -742,6 +742,7 @@ class SteinmetzGym(StatefulGym):
             self._stimulus_x = round(self._max_shift * (1 + action))
             # self._stimulus_x = round(self._max_shift + action)
         elif self.action_type == 'velocity':
+            action -= 1  # Shift from range(0, 2) to (-1, 1).
             self._stimulus_x += int(self.tanh_to_pixel(action) * self.dt)
         else:
             raise NotImplementedError

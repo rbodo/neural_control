@@ -7,26 +7,26 @@ from yacs.config import CfgNode
 def get_config():
     config = configs.config.get_config()
 
-    config.GPU = '8'
+    config.GPU = '2'
     config.EXPERIMENT_NAME = 'steinmetz_rnn_rl'
-    config.RESUME_EXPERIMENT = 'bidirectional_motor64'  # 2023-03-16'
+    config.RESUME_EXPERIMENT = 'visual8'  # 2023-03-16'
 
     base_path = os.path.join(os.path.expanduser(
         '~/Data/neural_control'), config.EXPERIMENT_NAME)
     config.paths.BASE_PATH = base_path
-    config.paths.MODEL_NAME = 'steinmetz_weights_motor'
+    config.paths.MODEL_NAME = 'steinmetz_weights_visual2'
 
     # Data
     config.data = CfgNode()
     # config.data.AREAS = ['VISa', 'VISp', 'LD', 'LP', 'PO', 'CA1', 'CA3', 'DG', 'SUB', 'ILA', 'MOs', 'PL', 'TT', 'LSr']
     # config.data.SUBJECT_INDEX = 7
-    config.data.AREAS = ['MOp']
-    config.data.SUBJECT_INDEX = 10
-    # config.data.AREAS = ['VISl', 'VISp', 'VISrl']
-    # config.data.SUBJECT_INDEX = 9
+    # config.data.AREAS = ['MOp']
+    # config.data.SUBJECT_INDEX = 10
+    config.data.AREAS = ['VISl', 'VISp', 'VISrl']
+    config.data.SUBJECT_INDEX = 9
 
     # Environment
-    config.process.CONTRAST_LEVELS = [0, 0.25, 0.5, 1]
+    config.process.CONTRAST_LEVELS = [0.25, 1]#[0, 0.25, 0.5, 1]
     config.process.TIME_STIMULUS = 0.5  # 0.5 s in paper
     config.process.TIMEOUT_WAIT = 1.5  # 1.5 s in paper
     config.process.GOCUE_WAIT = 0.7  # 0.7 s in paper
@@ -47,7 +47,7 @@ def get_config():
     config.model.NUM_LAYERS_CONTROLLER = 1
 
     config.perturbation = CfgNode()
-    config.perturbation.SKIP_PERTURBATION = False
+    config.perturbation.SKIP_PERTURBATION = True#
     config.perturbation.DROPOUT_PROBABILITIES = [0]
     config.perturbation.PERTURBATIONS = [('linear', [1e-1, 1e-3, 1e-5]),
                                          ('random', [1e-5, 1e-3, 1e-1]),
