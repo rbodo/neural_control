@@ -15,7 +15,7 @@ import seaborn as sns
 from scratch import configs
 from examples.linear_rnn_rl import (LinearRlPipeline, run_single,
                                     linear_schedule)
-from src.control_systems_torch import (SteinmetzGym, RnnModel, ControlledMlp,
+from src.control_systems_torch import (SteinmetzGym, GruModel, ControlledMlp,
                                        BidirectionalControlledMlp)
 from src.ppo_recurrent import (RecurrentPPO, ControlledExtractorMlpRnnPolicy,
                                CnnExtractor)
@@ -111,20 +111,22 @@ def set_weights_neuralsystem(model, device, filename, load_decoder=False):
     model.policy.lstm_actor.bias_ih_l0.data[:] = 0
     model.policy.lstm_actor.tau.data = tau
     model.policy.mlp_extractor.policy_net.neuralsystem[0].weight.data = W
-    # model.policy.mlp_extractor.policy_net.neuralsystem[0].bias.data = torch.tensor([-4.], device=device)
     model.policy.lstm_actor.flatten_parameters()
-    if load_decoder:
-        weights = dict(np.load(f'{path}/steinmetz_weights_decoder.npz'))
-        W = torch.tensor(weights.pop('W'), device=device)
-        b = torch.tensor(weights.pop('b'), device=device)
-        model.policy.action_net.weight.data = W
-        model.policy.action_net.bias.data = b
-        for k, v in weights.items():
-            getattr(model.policy.mlp_extractor.policy_net.decoder, k).data = \
-                torch.tensor(v, device=device)
-        model.policy.mlp_extractor.policy_net.decoder.flatten_parameters()
-    # model.policy.action_net.weight.data = torch.tensor([[1.]], device=device)
-    # model.policy.mlp_extractor.policy_net.decoder.bias.data = torch.tensor([-4.], device=device)
+    if not load_decoder:
+        return
+    W_ih_l0 = torch.tensor(weights['W_ih_l0'], device=device)
+    W_hh_l0 = torch.tensor(weights['W_hh_l0'], device=device)
+    b_ih_l0 = torch.tensor(weights['b_ih_l0'], device=device)
+    b_hh_l0 = torch.tensor(weights['b_hh_l0'], device=device)
+    W_out = torch.tensor(weights['W_out'], device=device)
+    b_out = torch.tensor(weights['b_out'], device=device)
+    model.policy.mlp_extractor.policy_net.decoder.weight_ih_l0.data = W_ih_l0
+    model.policy.mlp_extractor.policy_net.decoder.weight_hh_l0.data = W_hh_l0
+    model.policy.mlp_extractor.policy_net.decoder.bias_ih_l0.data = b_ih_l0
+    model.policy.mlp_extractor.policy_net.decoder.bias_hh_l0.data = b_hh_l0
+    model.policy.mlp_extractor.policy_net.decoder.flatten_parameters()
+    model.policy.action_net.weight.data = W_out
+    model.policy.action_net.bias.data = b_out
 
 
 class EvaluationCallback(BaseCallback):
@@ -161,16 +163,29 @@ class EvaluationCallback(BaseCallback):
         self.n_calls = 0
 
 
+def init_states(model):
+    neuralsystem = torch.zeros(model.policy.lstm_hidden_state_shape,
+                               dtype=torch.float, device=model.device)
+    decoder = torch.zeros(model.rollout_buffer.decoder_state_shape[1:],
+                          dtype=torch.float, device=model.device)
+    controller = torch.zeros(model.rollout_buffer.controller_state_shape[1:],
+                             dtype=torch.float, device=model.device)
+    return {'neuralsystem': neuralsystem, 'decoder': decoder,
+            'controller': controller}
+
+
 def run_n(n: int, env, model, **kwargs) -> Tuple[list, list]:
     """Run an RL agent for `n` episodes and return reward and run lengths."""
     final_rewards = []
     episode_lengths = []
     outputs = []
     labels = []
+    states_rnn = init_states(model)
     policy_net = model.policy.mlp_extractor.policy_net
     for i in range(n):
         policy_net.neuralsystem_outputs = []
         states, rewards, infos = run_single(env, model, return_infos=True,
+                                            rnn_state_init=states_rnn,
                                             **kwargs)
         final_rewards.append(rewards[-1])
         episode_lengths.append(len(rewards))
@@ -217,9 +232,11 @@ class SteinmetzRlPipeline(LinearRlPipeline):
                                                deterministic=deterministic)
         f = None
         if filename is not None:
+            states_rnn = init_states(self.model)
             policy_net = self.model.policy.mlp_extractor.policy_net
             policy_net.neuralsystem_outputs = []
-            _, _, infos = run_single(env, self.model, return_infos=True)
+            _, _, infos = run_single(env, self.model, return_infos=True,
+                                     rnn_state_init=states_rnn)
             with sns.axes_style('ticks'):
                 f = plot_trajectory(infos, policy_net.neuralsystem_outputs,
                                     show=False, ylim=100)
@@ -245,7 +262,8 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         return environment
 
     def get_model(self, freeze_neuralsystem, freeze_actor, freeze_controller,
-                  environment, load_weights_from=None) -> RecurrentPPO:
+                  environment, load_weights_from=None, load_decoder=False
+                  ) -> RecurrentPPO:
         neuralsystem_num_inputs = 32
         neuralsystem_num_states = len(self.config.data.AREAS)
         neuralsystem_num_hidden = self.config.model.NUM_HIDDEN_NEURALSYSTEM
@@ -254,7 +272,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         controller_num_layers = self.config.model.NUM_LAYERS_CONTROLLER
         batch_size = 1
         activation_rnn = self.config.model.ACTIVATION
-        activation_decoder = 'relu'  # Defaults to 'linear'
+        activation_decoder = None  # Defaults to 'linear'
         learning_rate = self.config.training.LEARNING_RATE
         time_stimulus = self.config.process.TIME_STIMULUS
         timeout_wait = self.config.process.TIMEOUT_WAIT
@@ -269,23 +287,15 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         if use_bidirectional_controller:
             controller_num_inputs += neuralsystem_num_states
 
-        controller = RnnModel(
+        controller = GruModel(
             controller_num_states, controller_num_layers,
             neuralsystem_num_states, controller_num_inputs,
-            activation_rnn, activation_decoder, self.device, dtype)
+            activation_decoder, self.device, dtype)
         if load_weights_from is None:
             controller.init_zero()
 
-        # decoder = QuadraticDecoder(a=8, b=0.2, device=self.device)
-        # decoder = torch.nn.Identity()
-        batchnorm = torch.nn.BatchNorm1d(neuralsystem_num_states)
-        decoder = torch.nn.GRU(neuralsystem_num_states, 32, 2, dtype=dtype,
+        decoder = torch.nn.RNN(neuralsystem_num_states, 32, 1, dtype=dtype,
                                device=self.device)
-        # decoder = torch.nn.RNN(neuralsystem_num_states, 32, 1, dtype=dtype,
-        #                        device=self.device, nonlinearity=activation_rnn)
-        decoder = torch.nn.Sequential(batchnorm, decoder)
-        # decoder = torch.nn.Sequential(batchnorm, GetFirst())
-        # decoder = batchnorm
 
         policy_kwargs = {
             'lstm_hidden_size': neuralsystem_num_hidden,
@@ -306,14 +316,14 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         model = RecurrentPPO(
             ControlledExtractorMlpRnnPolicy, environment, verbose=0,
             device=self.device, seed=self.config.SEED, tensorboard_log=log_dir,
-            policy_kwargs=policy_kwargs, n_epochs=10, n_steps=num_steps * batch_size,
-            learning_rate=linear_schedule(learning_rate, 0.005), ent_coef=0,
-            batch_size=None)
+            policy_kwargs=policy_kwargs, n_epochs=10,
+            n_steps=num_steps * batch_size, ent_coef=0, batch_size=None,
+            learning_rate=linear_schedule(learning_rate, 0.005))
 
         if load_weights_from is None:
             set_weights_neuralsystem(model, self.device,
                                      self.config.paths.MODEL_NAME,
-                                     load_decoder=False)
+                                     load_decoder=load_decoder)
         else:
             model.set_parameters(load_weights_from)
 
@@ -344,7 +354,7 @@ class SteinmetzRlPipeline(LinearRlPipeline):
         is_perturbed = perturbation_type in ['linear', 'random', 'noise']
         if is_perturbed:
             freeze_neuralsystem = True
-            freeze_actor = False#
+            freeze_actor = True
             freeze_controller = False
             # Initialize model using unperturbed, uncontrolled baseline from
             # previous run.
@@ -359,14 +369,15 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             freeze_controller = True
             self.model = self.get_model(
                 freeze_neuralsystem, freeze_actor, freeze_controller,
-                environment)
+                environment,
+                load_decoder=self.config.training.AGENT_PRETRAINING)
             num_epochs = int(self.config.training.NUM_EPOCHS_NEURALSYSTEM)
 
         controlled_neuralsystem = self.model.policy.mlp_extractor.policy_net
 
         # Apply perturbation to neural system.
         if is_perturbed and perturbation_level > 0:
-            self.apply_perturbation(perturbation_type)
+            self.apply_perturbation(perturbation_type, perturbation_level)
 
         # Get baseline performance before training.
         logging.info("Computing baseline performances...")
@@ -408,23 +419,15 @@ class SteinmetzRlPipeline(LinearRlPipeline):
             self.model.save(path_model)
             logging.info(f"Saved model to {path_model}.")
 
-    # def apply_perturbation(self, rng: np.random.Generator):
-    #     with torch.no_grad():
-    #         w = self.model.policy.mlp_extractor.policy_net.neuralsystem[0].weight
-    #         w_np = w.data.cpu().numpy()
-    #         rng.shuffle(w_np)
-    #         w.data[:] = torch.tensor(w_np, device=self.device)
-    #         w.requires_grad_(False)
-    #         # self.model.policy.lstm_actor.weight_ih_l0.data[:] = 0
-    #         # self.model.policy.lstm_actor.weight_ih_l0.data[:] *= -0.001
-
-    def apply_perturbation(self, kind='linear', perturbation_level=1):
+    def apply_perturbation(self, kind='linear', perturbation_level=0.):
         with torch.no_grad():
             w = self.model.policy.lstm_actor.weight_ih_l0.data
             if kind == 'linear':
                 w[:] = w * (1 - perturbation_level)
             elif kind == 'random':
-                w[:] = torch.rand_like(w) * perturbation_level
+                torch.nn.init.xavier_normal_(
+                    self.model.policy.lstm_actor.weight_ih_l0,
+                    perturbation_level)
             elif kind == 'noise':
                 w[:] = w + torch.randn_like(w) * w.std() * perturbation_level
             else:

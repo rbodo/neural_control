@@ -70,7 +70,8 @@ def run_single(env: StatefulGym,
                model: Union[RecurrentPPO, BaseAlgorithm],
                monitor: Optional[Monitor] = None,
                deterministic: Optional[bool] = True,
-               return_infos: Optional[bool] = False):
+               return_infos: Optional[bool] = False,
+               rnn_state_init: Optional[dict] = None):
     """Run an RL agent for one episode and return states and rewards.
 
     Parameters
@@ -85,6 +86,8 @@ def run_single(env: StatefulGym,
         If `True`, the actions are selected deterministically.
     return_infos
         If `True`, info dicts are returned.
+    rnn_state_init
+        Initial hidden states of RNNs.
 
     Returns
     -------
@@ -102,7 +105,8 @@ def run_single(env: StatefulGym,
     reward = 0
 
     # cell and hidden state of the LSTM
-    lstm_states = None
+    states_rnn = rnn_state_init.copy()
+
     num_envs = 1
     # Episode start signals are used to reset the lstm states
     episode_starts = np.ones((num_envs,), dtype=bool)
@@ -110,8 +114,8 @@ def run_single(env: StatefulGym,
     rewards = []
     infos = []
     while True:
-        u, lstm_states = model.predict(y, lstm_states, episode_starts,
-                                       deterministic)
+        u, states_rnn = model.predict(y, states_rnn, episode_starts,
+                                      deterministic)
         states.append(x)
         if monitor is not None:
             monitor.update_variables(t, states=x, outputs=y, control=u,

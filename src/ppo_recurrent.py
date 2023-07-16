@@ -48,6 +48,8 @@ SelfRecurrentPPO = TypeVar("SelfRecurrentPPO", bound="RecurrentPPO")
 class RNNStates(NamedTuple):
     pi: th.Tensor
     vf: th.Tensor
+    decoder: th.Tensor
+    controller: th.Tensor
 
 
 class RecurrentRolloutBuffer(RolloutBuffer):
@@ -72,12 +74,16 @@ class RecurrentRolloutBuffer(RolloutBuffer):
         observation_space: spaces.Space,
         action_space: spaces.Space,
         hidden_state_shape: Tuple[int, int, int, int],
+        decoder_state_shape: Tuple[int, int, int, int],
+        controller_state_shape: Tuple[int, int, int, int],
         device: Union[th.device, str] = "auto",
         gae_lambda: float = 1,
         gamma: float = 0.99,
         n_envs: int = 1,
     ):
         self.hidden_state_shape = hidden_state_shape
+        self.decoder_state_shape = decoder_state_shape
+        self.controller_state_shape = controller_state_shape
         self.seq_start_indices, self.seq_end_indices = None, None
         super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs)
 
@@ -85,6 +91,8 @@ class RecurrentRolloutBuffer(RolloutBuffer):
         super().reset()
         self.hidden_states_pi = np.zeros(self.hidden_state_shape, np.float32)
         self.hidden_states_vf = np.zeros(self.hidden_state_shape, np.float32)
+        self.hidden_states_decoder = np.zeros(self.decoder_state_shape, np.float32)
+        self.hidden_states_controller = np.zeros(self.controller_state_shape, np.float32)
 
     def add(self, *args, lstm_states: RNNStates, **kwargs) -> None:
         """
@@ -92,6 +100,8 @@ class RecurrentRolloutBuffer(RolloutBuffer):
         """
         self.hidden_states_pi[self.pos] = lstm_states.pi.cpu().numpy()
         self.hidden_states_vf[self.pos] = lstm_states.vf.cpu().numpy()
+        self.hidden_states_decoder[self.pos] = lstm_states.decoder.cpu().numpy()
+        self.hidden_states_controller[self.pos] = lstm_states.controller.cpu().numpy()
 
         super().add(*args, **kwargs)
 
@@ -102,7 +112,7 @@ class RecurrentRolloutBuffer(RolloutBuffer):
         if not self.generator_ready:
             # hidden_state_shape = (self.n_steps, lstm.num_layers, self.n_envs, lstm.hidden_size)
             # swap first to (self.n_steps, self.n_envs, lstm.num_layers, lstm.hidden_size)
-            for tensor in ["hidden_states_pi", "hidden_states_vf"]:
+            for tensor in ["hidden_states_pi", "hidden_states_vf", 'hidden_states_decoder', 'hidden_states_controller']:
                 self.__dict__[tensor] = self.__dict__[tensor].swapaxes(1, 2)
 
             # flatten but keep the sequence order
@@ -117,6 +127,8 @@ class RecurrentRolloutBuffer(RolloutBuffer):
                 "returns",
                 "hidden_states_pi",
                 "hidden_states_vf",
+                'hidden_states_decoder',
+                'hidden_states_controller',
                 "episode_starts",
             ]:
                 self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
@@ -172,8 +184,16 @@ class RecurrentRolloutBuffer(RolloutBuffer):
             # (n_envs * n_steps, n_layers, dim) -> (n_layers, n_seq, dim)
             self.hidden_states_vf[batch_inds][self.seq_start_indices].swapaxes(0, 1)
         )
+        lstm_states_decoder = (
+            self.hidden_states_decoder[batch_inds][self.seq_start_indices].swapaxes(0, 1)
+        )
+        lstm_states_controller = (
+            self.hidden_states_controller[batch_inds][self.seq_start_indices].swapaxes(0, 1)
+        )
         lstm_states_pi = self.to_torch(lstm_states_pi).contiguous()
         lstm_states_vf = self.to_torch(lstm_states_vf).contiguous()
+        lstm_states_decoder = self.to_torch(lstm_states_decoder).contiguous()
+        lstm_states_controller = self.to_torch(lstm_states_controller).contiguous()
 
         return RecurrentRolloutBufferSamples(
             # (batch_size, obs_dim) -> (n_seq, max_length, obs_dim) -> (n_seq * max_length, obs_dim)
@@ -183,7 +203,7 @@ class RecurrentRolloutBuffer(RolloutBuffer):
             old_log_prob=self.pad_and_flatten(self.log_probs[batch_inds]),
             advantages=self.pad_and_flatten(self.advantages[batch_inds]),
             returns=self.pad_and_flatten(self.returns[batch_inds]),
-            lstm_states=RNNStates(lstm_states_pi, lstm_states_vf),
+            lstm_states=RNNStates(lstm_states_pi, lstm_states_vf, lstm_states_decoder, lstm_states_controller),
             episode_starts=self.pad_and_flatten(self.episode_starts[batch_inds]),
             mask=self.pad_and_flatten(np.ones_like(self.returns[batch_inds])),
         )
@@ -373,7 +393,8 @@ class MlpRnnPolicy(ActorCriticPolicy):
             latent_vf = self.critic(vf_features)
             lstm_states_vf = lstm_states_pi
 
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
+        latent_pi, lstm_states_decoder, lstm_states_controller = \
+            self.mlp_extractor.forward_actor(latent_pi, features, lstm_states.decoder, lstm_states.controller, episode_starts)
         latent_vf = self.mlp_extractor.forward_critic(latent_vf)
 
         # Evaluate the values for the given observations
@@ -381,28 +402,37 @@ class MlpRnnPolicy(ActorCriticPolicy):
         distribution = self._get_action_dist_from_latent(latent_pi)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
-        return actions, values, log_prob, RNNStates(lstm_states_pi, lstm_states_vf)
+        return actions, values, log_prob, RNNStates(lstm_states_pi, lstm_states_vf,
+                                                    lstm_states_decoder, lstm_states_controller)
 
     def get_distribution(
         self,
         obs: th.Tensor,
-        lstm_states: th.Tensor,
+        states_rnn: Dict[str, th.Tensor],
         episode_starts: th.Tensor,
-    ) -> Tuple[Distribution, th.Tensor]:
+    ) -> Tuple[Distribution, Dict[str, th.Tensor]]:
         """
         Get the current policy distribution given the observations.
 
         :param obs: Observation.
-        :param lstm_states: The last hidden and memory states for the LSTM.
+        :param states_rnn: The last hidden and memory states for the LSTM.
         :param episode_starts: Whether the observations correspond to new episodes
             or not (we reset the lstm states in that case).
         :return: the action distribution and new hidden states.
         """
+        states_neuralsystem = states_rnn['neuralsystem']
+        states_decoder = states_rnn['decoder']
+        states_controller = states_rnn['controller']
         # Call the method from the parent of the parent class
         features = super(ActorCriticPolicy, self).extract_features(obs, self.pi_features_extractor)
-        latent_pi, lstm_states = self._process_sequence(features, lstm_states, episode_starts, self.lstm_actor)
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
-        return self._get_action_dist_from_latent(latent_pi), lstm_states
+        latent_pi, states_neuralsystem = self._process_sequence(features, states_neuralsystem, episode_starts, self.lstm_actor)
+        latent_pi, states_decoder, states_controller = self.mlp_extractor.forward_actor(
+            latent_pi, features, states_decoder, states_controller, episode_starts)
+        states_rnn['neuralsystem'] = states_neuralsystem
+        states_rnn['decoder'] = states_decoder
+        states_rnn['controller'] = states_controller
+
+        return self._get_action_dist_from_latent(latent_pi), states_rnn
 
     def predict_values(
         self,
@@ -463,7 +493,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         else:
             latent_vf = self.critic(vf_features)
 
-        latent_pi = self.mlp_extractor.forward_actor(latent_pi, features)
+        latent_pi, _, _ = self.mlp_extractor.forward_actor(latent_pi, features, lstm_states.decoder, lstm_states.controller, episode_starts)
         latent_vf = self.mlp_extractor.forward_critic(latent_vf)
 
         distribution = self._get_action_dist_from_latent(latent_pi)
@@ -474,36 +504,36 @@ class MlpRnnPolicy(ActorCriticPolicy):
     def _predict(
         self,
         observation: th.Tensor,
-        lstm_states: th.Tensor,
+        states_rnn: Dict[str, th.Tensor],
         episode_starts: th.Tensor,
         deterministic: bool = False,
-    ) -> Tuple[th.Tensor, th.Tensor]:
+    ) -> Tuple[th.Tensor, Dict[str, th.Tensor]]:
         """
         Get the action according to the policy for a given observation.
 
         :param observation:
-        :param lstm_states: The last hidden and memory states for the LSTM.
+        :param states_rnn: The last hidden and memory states for the LSTM.
         :param episode_starts: Whether the observations correspond to new episodes
             or not (we reset the lstm states in that case).
         :param deterministic: Whether to use stochastic or deterministic actions
         :return: Taken action according to the policy and hidden states of the RNN
         """
-        distribution, lstm_states = self.get_distribution(observation, lstm_states, episode_starts)
-        return distribution.get_actions(deterministic=deterministic), lstm_states
+        distribution, states_rnn = self.get_distribution(observation, states_rnn, episode_starts)
+        return distribution.get_actions(deterministic=deterministic), states_rnn
 
     def predict(
         self,
         observation: Union[np.ndarray, Dict[str, np.ndarray]],
-        state: Optional[np.ndarray] = None,
+        states_rnn: Optional[Dict[str, th.Tensor]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
-    ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
+    ) -> Tuple[np.ndarray, Dict[str, th.Tensor]]:
         """
         Get the policy action from an observation (and optional hidden state).
         Includes sugar-coating to handle different observations (e.g. normalizing images).
 
         :param observation: the input observation
-        :param lstm_states: The last hidden and memory states for the LSTM.
+        :param states_rnn: The last hidden and memory states for the LSTM.
         :param episode_starts: Whether the observations correspond to new episodes
             or not (we reset the lstm states in that case).
         :param deterministic: Whether or not to return deterministic actions.
@@ -520,21 +550,21 @@ class MlpRnnPolicy(ActorCriticPolicy):
         else:
             n_envs = observation.shape[0]
         # state : (n_layers, n_envs, dim)
-        if state is None:
-            # Initialize hidden states to zeros
-            state = np.concatenate([np.zeros(self.lstm_hidden_state_shape) for _ in range(n_envs)], axis=1)
+        # if states_rnn is None:
+        #     # Initialize hidden states to zeros
+        #     states_rnn = np.concatenate([np.zeros(self.lstm_hidden_state_shape) for _ in range(n_envs)], axis=1)
 
         if episode_start is None:
             episode_start = np.array([False for _ in range(n_envs)])
 
         with th.no_grad():
             # Convert to PyTorch tensors
-            states = th.tensor(state, dtype=th.float).to(self.device)
+            # states = th.tensor(state, dtype=th.float).to(self.device)
             episode_starts = th.tensor(episode_start).float().to(self.device)
-            actions, states = self._predict(
-                observation, lstm_states=states, episode_starts=episode_starts, deterministic=deterministic
+            actions, states_rnn = self._predict(
+                observation, states_rnn=states_rnn, episode_starts=episode_starts, deterministic=deterministic
             )
-            states = states.cpu().numpy()
+            # states = states.cpu().numpy()
 
         # Convert to numpy
         actions = actions.cpu().numpy()
@@ -552,7 +582,7 @@ class MlpRnnPolicy(ActorCriticPolicy):
         if not vectorized_env:
             actions = actions.squeeze(axis=0)
 
-        return actions, states
+        return actions, states_rnn
 
 
 class ControlledActorMlpRnnPolicy(MlpRnnPolicy):
@@ -591,7 +621,7 @@ class ControlledExtractorMlpRnnPolicy(MlpRnnPolicy):
             feature_dim=self.lstm_output_dim, net_arch=self.net_arch,
             activation_fn=self.activation_fn, device=self.device,
             controlled_mlp_class=self.net_arch['mlp_extractor_class'])
-        self.mlp_extractor.latent_dim_pi = self.mlp_extractor.policy_net.decoder[1].hidden_size
+        self.mlp_extractor.latent_dim_pi = self.mlp_extractor.policy_net.decoder.hidden_size
 
 
 class GeneralizedMlpExtractor(MlpExtractor):
@@ -772,20 +802,30 @@ class RecurrentPPO(OnPolicyAlgorithm):
         # We assume that LSTM for the actor and the critic
         # have the same architecture
         lstm = self.policy.lstm_actor
+        decoder = self.policy.mlp_extractor.policy_net.decoder
+        controller = self.policy.mlp_extractor.policy_net.controller.rnn
 
         single_hidden_state_shape = (lstm.num_layers, self.n_envs, lstm.hidden_size)
+        single_decoder_state_shape = (decoder.num_layers, self.n_envs, decoder.hidden_size)
+        single_controller_state_shape = (controller.num_layers, self.n_envs, controller.hidden_size)
         # hidden and cell states for actor and critic
         self._last_lstm_states = RNNStates(
                 th.zeros(single_hidden_state_shape, device=self.device),
-                th.zeros(single_hidden_state_shape, device=self.device))
+                th.zeros(single_hidden_state_shape, device=self.device),
+                th.zeros(single_decoder_state_shape, device=self.device),
+                th.zeros(single_controller_state_shape, device=self.device))
 
-        hidden_state_buffer_shape = (self.n_steps, lstm.num_layers, self.n_envs, lstm.hidden_size)
+        hidden_state_buffer_shape = (self.n_steps,) + single_hidden_state_shape
+        decoder_state_buffer_shape = (self.n_steps,) + single_decoder_state_shape
+        controller_state_buffer_shape = (self.n_steps,) + single_controller_state_shape
 
         self.rollout_buffer = buffer_cls(
             self.n_steps,
             self.observation_space,
             self.action_space,
             hidden_state_buffer_shape,
+            decoder_state_buffer_shape,
+            controller_state_buffer_shape,
             self.device,
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,

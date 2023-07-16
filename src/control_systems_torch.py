@@ -1,15 +1,16 @@
 ﻿import logging
 import os
-from gymnasium.core import RenderFrame, ActType, ObsType
-from skimage.filters import gabor_kernel
 from typing import Union, Tuple, Optional, Callable, List, Dict, Iterator, \
     SupportsFloat, Any
 
+from skimage.filters import gabor_kernel
+from stable_baselines3.common.utils import zip_strict
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.core import RenderFrame, ActType, ObsType
 import torch
-from torch import nn
+from torch import nn, Tensor
 from yacs.config import CfgNode
 
 from src.empirical_gramians import emgr
@@ -32,7 +33,7 @@ class MlpModel(nn.Module):
                                 device=device)
         self.activation_output = activation_output
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         hidden = self.activation_hidden(self.hidden(x))
         output = self.activation_output(self.output(hidden))
         # Add dummy time dimension for compatibility with RNN interface.
@@ -74,16 +75,24 @@ class RnnModel(nn.Module):
         self.rnn.reset_parameters()
         self.decoder.reset_parameters()
 
-    def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
+    def begin_state(self, batch_size: Optional[int] = None) -> Tensor:
         shape = [self.num_layers, batch_size, self.num_hidden] if batch_size \
             else [self.num_layers, self.num_hidden]
         return torch.zeros(*shape, **self.tkwargs)
 
-    def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: Tensor, h: Optional[Tensor] = None) -> Tuple[Tensor,
+                                                                      Tensor]:
         output, hidden = self.rnn(x, h)
         decoded = self.activation(self.decoder(output))
         return decoded, hidden
+
+
+class GruModel(RnnModel):
+    def __init__(self, num_hidden=1, num_layers=1, num_outputs=1, input_size=1,
+                 activation_decoder=None, device=None, dtype=None):
+        super().__init__(num_hidden, num_layers, num_outputs, input_size,
+                         None, activation_decoder, device, dtype)
+        self.rnn = nn.GRU(input_size, num_hidden, num_layers, **self.tkwargs)
 
 
 class StochasticLinearIOSystem(nn.Module):
@@ -96,8 +105,8 @@ class StochasticLinearIOSystem(nn.Module):
         self.num_states = num_states
 
         self.tkwargs = dict(dtype=dtype, device=device)
-        self.dt = nn.Parameter(torch.tensor(
-            (dt,), **self.tkwargs), requires_grad=False)
+        self.dt = nn.Parameter(Tensor((dt,), **self.tkwargs),
+                               requires_grad=False)
         self.A = nn.Parameter(torch.zeros(
             self.num_states, self.num_states, **self.tkwargs),
             requires_grad=False)
@@ -113,28 +122,26 @@ class StochasticLinearIOSystem(nn.Module):
         self.W = None
         self.V = None
 
-    def begin_state(self, batch_size: int) -> torch.Tensor:
+    def begin_state(self, batch_size: int) -> Tensor:
         return torch.zeros(1, batch_size, self.num_states, **self.tkwargs)
 
-    def step(self, x: torch.Tensor, u: torch.Tensor, **kwargs) -> torch.Tensor:
+    def step(self, x: Tensor, u: Tensor, **kwargs) -> Tensor:
         dxdt = self.dynamics(x, u)
         x = self.integrate(x, dxdt, **kwargs)
         return self.add_process_noise(x, **kwargs)
 
-    def dynamics(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def dynamics(self, x: Tensor, u: Tensor) -> Tensor:
         return (torch.tensordot(x, self.A.T, 1) +
                 torch.tensordot(u, self.B.T, 1))
 
-    def integrate(self, x: torch.Tensor, dxdt: torch.Tensor, **kwargs
-                  ) -> torch.Tensor:
+    def integrate(self, x: Tensor, dxdt: Tensor, **kwargs) -> Tensor:
         method = kwargs.get('method', 'euler-maruyama')
         if method == 'euler-maruyama':  # x + dt * dx/dt
             return x + self.dt * dxdt
         else:
             raise NotImplementedError
 
-    def add_process_noise(self, x: torch.Tensor, deterministic=False
-                          ) -> torch.Tensor:
+    def add_process_noise(self, x: Tensor, deterministic=False) -> Tensor:
         if self.W is None or deterministic:
             return x
         dW = self.get_additive_white_gaussian_noise(
@@ -143,26 +150,24 @@ class StochasticLinearIOSystem(nn.Module):
             torch.sqrt(self.dt))
         return x + torch.tensordot(dW.unsqueeze(0), self.W.T, 1).squeeze(0)
 
-    def output(self, x: torch.Tensor, u: torch.Tensor,
-               deterministic: Optional[bool] = False) -> torch.Tensor:
+    def output(self, x: Tensor, u: Tensor,
+               deterministic: Optional[bool] = False) -> Tensor:
         y = (torch.tensordot(x, self.C.T, 1) +
              torch.tensordot(u, self.D.T, 1))
         return self.add_observation_noise(y, deterministic)
 
-    def add_observation_noise(self, y: torch.Tensor,
-                              deterministic: Optional[bool] = False
-                              ) -> torch.Tensor:
+    def add_observation_noise(
+            self, y: Tensor, deterministic: Optional[bool] = False) -> Tensor:
         if self.V is None or deterministic:
             return y
         return y + self.get_additive_white_gaussian_noise(self.num_outputs,
                                                           torch.diag(self.V))
 
-    def get_additive_white_gaussian_noise(self, n: int, scale: torch.Tensor
-                                          ) -> torch.Tensor:
+    def get_additive_white_gaussian_noise(self, n: int,
+                                          scale: Tensor) -> Tensor:
         return torch.normal(torch.zeros(n, **self.tkwargs), scale)
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor, **kwargs
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: Tensor, u: Tensor, **kwargs) -> Tuple[Tensor, Tensor]:
         x = self.step(x, u, **kwargs)
         return self.output(x, u, **kwargs), x
 
@@ -213,22 +218,21 @@ class MLP:
         if path_model is not None:
             self.model.load_state_dict(torch.load(path_model))
 
-    def get_cost(self, x: torch.Tensor, u: torch.Tensor) -> float:
-        return get_lqr_cost(asnumpy(x), asnumpy(u), self.Q, self.R,
-                            self.dt)
+    def get_cost(self, x: Tensor, u: Tensor) -> float:
+        return get_lqr_cost(asnumpy(x), asnumpy(u), self.Q, self.R, self.dt)
 
-    def get_control(self, x: torch.Tensor) -> torch.Tensor:
+    def get_control(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    def step(self, x: torch.Tensor, y: torch.Tensor
-             ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+    def step(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor,
+                                                  Tensor, float]:
         u = self.get_control(y)
         x = self.process.step(x, u)
         y = self.process.output(x, u)
         c = self.get_cost(x, u)
         return x, y, u, c
 
-    def dynamics(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+    def dynamics(self, x: Tensor, u: Tensor) -> Tensor:
         y = self.process.output(x, u)
         u = self.get_control(y)
         return self.process.dynamics(x, u)
@@ -246,16 +250,15 @@ class ControlledNeuralSystem(nn.Module):
     def forward(self, *args, **kwargs):
         raise NotImplementedError
 
-    def readout(self, x: torch.Tensor) -> torch.Tensor:
+    def readout(self, x: Tensor) -> Tensor:
         return (torch.tensordot(x, self.controller.rnn.weight_ih_l0.T, 1) +
                 self.controller.rnn.bias_ih_l0)
 
-    def readin(self, x: torch.Tensor) -> torch.Tensor:
+    def readin(self, x: Tensor) -> Tensor:
         return (torch.tensordot(x, self.controller.decoder.weight.T, 1) +
                 self.controller.decoder.bias)
 
-    def begin_state(self, batch_size: int) -> Tuple[torch.Tensor,
-                                                    torch.Tensor]:
+    def begin_state(self, batch_size: int) -> Tuple[Tensor, Tensor]:
         neuralsystem_states = torch.zeros(self.num_layers, batch_size,
                                           self.hidden_size, **self.tkwargs)
         controller_states = self.controller.begin_state(batch_size)
@@ -288,8 +291,8 @@ class ControlledRnn(ControlledNeuralSystem):
         self.num_layers = self.neuralsystem.num_layers
         self.hidden_size = self.neuralsystem.hidden_size
 
-    def forward(self, x: torch.Tensor, h: Optional[torch.Tensor] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: Tensor, h: Optional[Tensor] = None) -> Tuple[Tensor,
+                                                                      Tensor]:
         neuralsystem_states, controller_states = self.begin_state(x.shape[1])
         if h is not None:
             neuralsystem_states = h
@@ -312,24 +315,47 @@ class ControlledMlp(ControlledNeuralSystem):
         self.decoder = decoder
         self.a_max = a_max
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        controller_states = self.begin_state()
+    def forward(self, x: Tensor, u: Tensor, decoder_states: Tensor,
+                controller_states: Tensor, episode_starts: Tensor
+                ) -> Tuple[Tensor, Tensor, Tensor]:
+        # (sequence length, batch size, features dim)
+        # (batch size = n_envs for data collection or n_seq when doing gradient
+        # update)
+        n_seq = decoder_states.shape[1]
+        # Batch to sequence (padded batch size, features_dim) ->
+        # (max length, n_seq, features_dim)
+        # max length (max sequence length) is always 1 during data collection
+        x_sequence = x.reshape((n_seq, -1, x.shape[-1])).swapaxes(0, 1)
+        u_sequence = u.reshape((n_seq, -1, u.shape[-1])).swapaxes(0, 1)
+        episode_starts = episode_starts.reshape((n_seq, -1)).swapaxes(0, 1)
+
         neuralsystem_outputs = []
-        for neuralsystem_input, environment_output in zip(x, u):
-            neuralsystem_input = neuralsystem_input.unsqueeze(0)
-            environment_output = environment_output.unsqueeze(0)
-            neuralsystem_output = self.neuralsystem(neuralsystem_input)
+        decoder_outputs = []
+        for neuralsystem_input, environment_output, episode_start in \
+                zip_strict(x_sequence, u_sequence, episode_starts):
+            # Reset the states at the beginning of a new episode
+            reset = (1 - episode_start).view(1, n_seq, 1)
+            neuralsystem_output = self.neuralsystem(
+                neuralsystem_input.unsqueeze(0))
             controller_output, controller_states = self.controller(
-                environment_output, controller_states)
+                environment_output, controller_states * reset)
             controller_output = torch.clip(controller_output, max=self.a_max)
             neuralsystem_outputs.append(neuralsystem_output +
                                         controller_output)
-        z = torch.concat(neuralsystem_outputs, dim=0)
+            decoder_output, decoder_states = self.decoder(
+                neuralsystem_outputs[-1], decoder_states * reset)
+            decoder_outputs.append(decoder_output)
+        # Sequence to batch
+        # (sequence length, n_seq, lstm_out_dim) -> (batch_size, lstm_out_dim)
+        decoder_outputs = \
+            torch.flatten(torch.concat(decoder_outputs).transpose(0, 1), 0, 1)
+        z = torch.flatten(torch.concat(neuralsystem_outputs).transpose(0, 1),
+                          0, 1)
         if hasattr(self, 'neuralsystem_outputs'):
             self.neuralsystem_outputs.append(z.detach().cpu().numpy())
-        return self.decoder(z)[0]
+        return decoder_outputs, decoder_states, controller_states
 
-    def begin_state(self, batch_size: Optional[int] = None) -> torch.Tensor:
+    def begin_state(self, batch_size: Optional[int] = None) -> Tensor:
         return self.controller.begin_state(batch_size)
 
     def get_weight_hash(self) -> Dict[str, List[int]]:
@@ -343,24 +369,47 @@ class BidirectionalControlledMlp(ControlledMlp):
     """Perturbed MLP stabilized by a controller RNN which uses measurements
     from the MLP itself."""
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        controller_states = self.begin_state()
+    def forward(self, x: Tensor, u: Tensor, decoder_states: Tensor,
+                controller_states: Tensor, episode_starts: Tensor
+                ) -> Tuple[Tensor, Tensor, Tensor]:
+        # (sequence length, batch size, features dim)
+        # (batch size = n_envs for data collection or n_seq when doing gradient
+        # update)
+        n_seq = decoder_states.shape[1]
+        # Batch to sequence (padded batch size, features_dim) ->
+        # (max length, n_seq, features_dim)
+        # max length (max sequence length) is always 1 during data collection
+        x_sequence = x.reshape((n_seq, -1, x.shape[-1])).swapaxes(0, 1)
+        u_sequence = u.reshape((n_seq, -1, u.shape[-1])).swapaxes(0, 1)
+        episode_starts = episode_starts.reshape((n_seq, -1)).swapaxes(0, 1)
+
         neuralsystem_outputs = []
-        for neuralsystem_input, environment_output in zip(x, u):
-            neuralsystem_input = neuralsystem_input.unsqueeze(0)
-            environment_output = environment_output.unsqueeze(0)
-            neuralsystem_output = self.neuralsystem(neuralsystem_input)
-            controller_input = torch.concat([neuralsystem_output,
-                                             environment_output], -1)
+        decoder_outputs = []
+        for neuralsystem_input, environment_output, episode_start in \
+                zip_strict(x_sequence, u_sequence, episode_starts):
+            # Reset the states at the beginning of a new episode
+            reset = (1 - episode_start).view(1, n_seq, 1)
+            neuralsystem_output = self.neuralsystem(
+                neuralsystem_input.unsqueeze(0))
+            controller_input = torch.concat([
+                neuralsystem_output, environment_output.unsqueeze(0)], -1)
             controller_output, controller_states = self.controller(
-                controller_input, controller_states)
+                controller_input, controller_states * reset)
             controller_output = torch.clip(controller_output, max=self.a_max)
             neuralsystem_outputs.append(neuralsystem_output +
                                         controller_output)
-        z = torch.concat(neuralsystem_outputs, dim=0)
+            decoder_output, decoder_states = self.decoder(
+                neuralsystem_outputs[-1], decoder_states * reset)
+            decoder_outputs.append(decoder_output)
+        # Sequence to batch
+        # (sequence length, n_seq, lstm_out_dim) -> (batch_size, lstm_out_dim)
+        decoder_outputs = \
+            torch.flatten(torch.concat(decoder_outputs).transpose(0, 1), 0, 1)
+        z = torch.flatten(torch.concat(neuralsystem_outputs).transpose(0, 1),
+                          0, 1)
         if hasattr(self, 'neuralsystem_outputs'):
             self.neuralsystem_outputs.append(z.detach().cpu().numpy())
-        return self.decoder(z)[0]
+        return decoder_outputs, decoder_states, controller_states
 
 
 class RnnWithTimeconstant(nn.RNN):
@@ -631,11 +680,11 @@ def get_gabor(rectify=True, normalize=True) -> np.ndarray:
 
 
 def norm(x: np.ndarray) -> np.ndarray:
-    return (x - np.min(x)) / (np.max(x) - np.min(x))
+    return np.subtract(x, np.min(x)) / np.subtract(np.max(x), np.min(x))
 
 
 def apply_contrast(image: np.ndarray, contrast: float) -> np.ndarray:
-    return contrast * image
+    return np.multiply(image, contrast)
 
 
 class SteinmetzGym(StatefulGym):
@@ -738,9 +787,11 @@ class SteinmetzGym(StatefulGym):
             return
 
         if self.action_type == 'position':
-            # The origin of the stimulus position is internally offset.
-            self._stimulus_x = round(self._max_shift * (1 + action))
+            # The origin of the stimulus position is internally offset by
+            # max_shift.
             # self._stimulus_x = round(self._max_shift + action)
+            # Assumes wheel position is normalized:
+            self._stimulus_x = round(self._max_shift * (1 + action))
         elif self.action_type == 'velocity':
             action -= 1  # Shift from range(0, 2) to (-1, 1).
             self._stimulus_x += int(self.tanh_to_pixel(action) * self.dt)
@@ -892,7 +943,7 @@ class Gramians(nn.Module):
             self.num_controls = self.environment.process.num_inputs
         self._return_observations = None
 
-    def forward(self, x: Callable, h: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Callable, h: Tensor) -> Tensor:
         self.environment.reset()
         neuralsystem_states = h
         neuralsystem_output = atleast_3d(torch.zeros(self.num_controls,
@@ -946,12 +997,12 @@ def get_device(config: CfgNode) -> torch.device:
     return torch.device('cpu' if not gpu else 'cuda:0')
 
 
-def asnumpy(x: torch.Tensor) -> np.ndarray:
+def asnumpy(x: Tensor) -> np.ndarray:
     return x.cpu().numpy()
 
 
-def astensor(x: np.ndarray, **kwargs) -> torch.Tensor:
-    return torch.tensor(x, **kwargs)
+def astensor(x: np.ndarray, **kwargs) -> Tensor:
+    return Tensor(x, **kwargs)
 
 
 def to_hash(params: Iterator[torch.nn.Parameter]) -> List[int]:
